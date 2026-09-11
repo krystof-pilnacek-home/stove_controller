@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stove Controller",
+        "description": "Configure the stove demand controller. The integration creates a demand switch that your central boiler thermostat toggles directly.",
+        "data": {
+          "relay_entity": "Relay switch entity",
+          "min_on_duration": "Minimum ON duration (minutes)",
+          "min_off_duration": "Minimum OFF duration (minutes)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Stove Controller Options",
+        "description": "Adjust the anti-short-cycle timing parameters.",
+        "data": {
+          "min_on_duration": "Minimum ON duration (minutes)",
+          "min_off_duration": "Minimum OFF duration (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "stove_controller": {
+        "state": {
+          "idle": "Idle",
+          "heating": "Heating",
+          "pending_on": "Pending On",
+          "pending_off": "Pending Off"
+        }
+      }
+    },
+    "switch": {
+      "stove_demand": {
+        "name": "Stove Demand"
+      }
+    }
+  }
+}
