@@ -17,8 +17,10 @@ from .const import (
     CONF_MIN_OFF_DURATION,
     CONF_MIN_ON_DURATION,
     CONF_RELAY_ENTITY,
+    CONF_UPDATE_INTERVAL,
     DEFAULT_MIN_OFF_DURATION,
     DEFAULT_MIN_ON_DURATION,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
 )
 
@@ -61,6 +63,15 @@ OPTIONS_SCHEMA = vol.Schema(
             NumberSelectorConfig(
                 min=1, max=180, step=1,
                 unit_of_measurement="min",
+                mode=NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Required(
+            CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
+        ): NumberSelector(
+            NumberSelectorConfig(
+                min=1, max=60, step=1,
+                unit_of_measurement="s",
                 mode=NumberSelectorMode.BOX,
             )
         ),
@@ -107,6 +118,9 @@ class StoveControllerOptionsFlow(config_entries.OptionsFlowWithReload):
             ),
             CONF_MIN_OFF_DURATION: current.get(
                 CONF_MIN_OFF_DURATION, DEFAULT_MIN_OFF_DURATION
+            ),
+            CONF_UPDATE_INTERVAL: current.get(
+                CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
             ),
         }
         return self.async_show_form(

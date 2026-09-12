@@ -1,5 +1,6 @@
 """Constants for the Stove Controller integration."""
 
+from enum import StrEnum
 from typing import Final
 
 DOMAIN: Final = "stove_controller"
@@ -7,11 +8,27 @@ DOMAIN: Final = "stove_controller"
 CONF_RELAY_ENTITY: Final = "relay_entity"
 CONF_MIN_ON_DURATION: Final = "min_on_duration"
 CONF_MIN_OFF_DURATION: Final = "min_off_duration"
+CONF_UPDATE_INTERVAL: Final = "update_interval"
 
 DEFAULT_MIN_ON_DURATION: Final = 30
 DEFAULT_MIN_OFF_DURATION: Final = 25
+DEFAULT_UPDATE_INTERVAL: Final = 5
 
-STATE_IDLE: Final = "idle"
-STATE_HEATING: Final = "heating"
-STATE_PENDING_ON: Final = "pending_on"
-STATE_PENDING_OFF: Final = "pending_off"
+
+class ControllerState(StrEnum):
+    """States for the stove controller state machine."""
+    IDLE = "idle"
+    HEATING = "heating"
+    PENDING_ON = "pending_on"
+    PENDING_OFF = "pending_off"
+
+
+# Event constants for HA event bus communication
+STOVE_DEMAND_CHANGED: Final = f"{DOMAIN}_demand_changed"
+
+
+# Backwards compatibility aliases
+STATE_IDLE: Final = ControllerState.IDLE
+STATE_HEATING: Final = ControllerState.HEATING
+STATE_PENDING_ON: Final = ControllerState.PENDING_ON
+STATE_PENDING_OFF: Final = ControllerState.PENDING_OFF

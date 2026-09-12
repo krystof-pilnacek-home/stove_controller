@@ -14,8 +14,10 @@ from stove_controller.const import (
     CONF_RELAY_ENTITY,
     CONF_MIN_ON_DURATION,
     CONF_MIN_OFF_DURATION,
+    CONF_UPDATE_INTERVAL,
     DEFAULT_MIN_ON_DURATION,
     DEFAULT_MIN_OFF_DURATION,
+    DEFAULT_UPDATE_INTERVAL,
 )
 
 
@@ -47,6 +49,7 @@ class TestOptionsSchema:
         expected_keys = {
             CONF_MIN_ON_DURATION,
             CONF_MIN_OFF_DURATION,
+            CONF_UPDATE_INTERVAL,
         }
         assert expected_keys == schema_keys
 

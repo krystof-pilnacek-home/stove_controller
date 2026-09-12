@@ -5,15 +5,16 @@ replacing the external input_boolean.stove_demand helper.
 """
 
 import logging
+from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, STOVE_DEMAND_CHANGED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Stove Demand switch."""
     switch = StoveDemandSwitch(entry.entry_id)
+    # Store reference for backwards compatibility with sync_demand
     store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     store["switch"] = switch
     async_add_entities([switch])
@@ -77,18 +79,14 @@ class StoveDemandSwitch(SwitchEntity, RestoreEntity):
         await self._notify_controller()
 
     async def _notify_controller(self) -> None:
-        """Forward the demand change to the controller sensor."""
-        store = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        sensor = store.get("sensor")
-        if sensor is not None:
-            try:
-                await sensor.handle_demand_change(self._is_on)
-            except Exception as e:
-                _LOGGER.error(
-                    "Failed to notify sensor of demand change: %s", e
-                )
-        else:
-            _LOGGER.warning(
-                "Stove controller sensor not available; demand change "
-                "will be picked up on next sync"
+        """Forward the demand change to the controller sensor via event bus."""
+        try:
+            entity_id = getattr(self, "entity_id", None) or self._attr_unique_id
+            self.hass.bus.async_fire(
+                STOVE_DEMAND_CHANGED,
+                {"entry_id": self._entry_id, "demand_on": self._is_on, "entity_id": entity_id},
+            )
+        except Exception as e:
+            _LOGGER.error(
+                "Failed to fire demand change event: %s", e
             )

@@ -91,29 +91,36 @@ class TestStoveDemandSwitch:
 
     @pytest.mark.asyncio
     async def test_notify_controller_with_sensor(self, switch):
-        """Test notifying controller when sensor is available."""
-        mock_sensor = MagicMock()
-        mock_sensor.handle_demand_change = AsyncMock()
+        """Test notifying controller via event bus."""
         switch.hass = MagicMock()
-        switch.hass.data = {DOMAIN: {"test_entry_id": {"sensor": mock_sensor}}}
+        switch.hass.data = {DOMAIN: {"test_entry_id": {"sensor": MagicMock()}}}
+        switch.hass.bus = MagicMock()
+        switch.hass.bus.async_fire = MagicMock()
         switch._is_on = True
 
         await switch._notify_controller()
 
-        assert mock_sensor.handle_demand_change.called
-        call_args = mock_sensor.handle_demand_change.call_args
-        assert call_args[0][0] is True
+        # Verify event was fired
+        switch.hass.bus.async_fire.assert_called_once()
+        call_args = switch.hass.bus.async_fire.call_args
+        assert call_args[0][0] == "stove_controller_demand_changed"
+        assert call_args[0][1]["demand_on"] is True
 
     @pytest.mark.asyncio
     async def test_notify_controller_without_sensor(self, switch):
-        """Test notifying controller when sensor is not available."""
+        """Test notifying controller via event bus (no direct sensor dependency)."""
         switch.hass = MagicMock()
         switch.hass.data = {DOMAIN: {"test_entry_id": {}}}
+        switch.hass.bus = MagicMock()
+        switch.hass.bus.async_fire = MagicMock()
         switch._is_on = True
 
         with patch("stove_controller.switch._LOGGER") as mock_logger:
             await switch._notify_controller()
-            mock_logger.warning.assert_called_once()
+            # With event-based communication, no warning is logged
+            # The event is fired regardless of whether sensor is listening
+            switch.hass.bus.async_fire.assert_called_once()
+            mock_logger.warning.assert_not_called()
 
 
 class TestAsyncSetupEntry:

@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -21,13 +21,16 @@ from .const import (
     CONF_MIN_OFF_DURATION,
     CONF_MIN_ON_DURATION,
     CONF_RELAY_ENTITY,
+    CONF_UPDATE_INTERVAL,
     DEFAULT_MIN_OFF_DURATION,
     DEFAULT_MIN_ON_DURATION,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     STATE_HEATING,
     STATE_IDLE,
     STATE_PENDING_OFF,
     STATE_PENDING_ON,
+    STOVE_DEMAND_CHANGED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,10 +44,12 @@ async def async_setup_entry(
     relay_entity = data[CONF_RELAY_ENTITY]
     min_on_min = data.get(CONF_MIN_ON_DURATION, DEFAULT_MIN_ON_DURATION)
     min_off_min = data.get(CONF_MIN_OFF_DURATION, DEFAULT_MIN_OFF_DURATION)
+    update_interval = data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
 
     sensor = StoveControllerSensor(
-        entry.entry_id, relay_entity, min_on_min, min_off_min
+        entry.entry_id, relay_entity, min_on_min, min_off_min, update_interval
     )
+    # Store reference for backwards compatibility with __init__.py sync
     store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     store["sensor"] = sensor
     async_add_entities([sensor])
@@ -66,12 +71,14 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         relay_entity: str,
         min_on_min: int,
         min_off_min: int,
+        update_interval: int = DEFAULT_UPDATE_INTERVAL,
     ) -> None:
         """Initialize the sensor."""
         self._entry_id: str = entry_id
         self._relay_entity: str = relay_entity
         self._min_on_duration: int = min_on_min * 60  # Convert minutes to seconds
         self._min_off_duration: int = min_off_min * 60  # Convert minutes to seconds
+        self._update_interval: int = update_interval
 
         self._attr_name = "Stove Controller"
         self._attr_unique_id = f"{entry_id}_stove_controller"
@@ -106,6 +113,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             "demand_on": self._demand_on,
             "min_on_duration_min": int(self._min_on_duration / 60),
             "min_off_duration_min": int(self._min_off_duration / 60),
+            "update_interval_sec": self._update_interval,
             "in_grace_period": self._state in (STATE_PENDING_ON, STATE_PENDING_OFF),
             "time_remaining_sec": 0,
         }
@@ -158,6 +166,13 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                             self._do_turn_on if self._state == STATE_PENDING_ON else self._do_turn_off
                         )
 
+        # Listen for demand change events from the switch
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                STOVE_DEMAND_CHANGED, self._on_demand_change_event
+            )
+        )
+
         # Track relay state changes
         self.async_on_remove(
             async_track_state_change_event(
@@ -180,11 +195,25 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._cancel_wait()
         await self._apply_demand_logic()
     async def sync_demand(self, demand_on: bool, demand_entity_id: Optional[str] = None) -> None:
-        """Sync demand state from the switch after setup."""
+        """Sync demand state from the switch after setup (backwards compatibility)."""
         self._demand_on = demand_on
         if demand_entity_id is not None:
             self._demand_entity_id = demand_entity_id
         await self._evaluate_state()
+
+    @callback
+    async def _on_demand_change_event(self, event: Event) -> None:
+        """Handle demand change events from the switch entity."""
+        if event.data.get("entry_id") != self._entry_id:
+            return
+        demand_on = event.data.get("demand_on")
+        demand_entity_id = event.data.get("entity_id")
+        if demand_on is not None:
+            self._demand_on = demand_on
+        if demand_entity_id is not None:
+            self._demand_entity_id = demand_entity_id
+        self._cancel_wait()
+        await self._apply_demand_logic()
 
     def _get_state(self, entity_id: str) -> Optional[str]:
         """Get entity state string safely."""
@@ -237,9 +266,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
     def _start_periodic_update(self) -> None:
         """Start periodic state updates for the countdown."""
         self._stop_periodic_update()
-        # Update every 5 seconds instead of 1 to reduce database writes
+        # Update at the configured interval to reduce database writes
         self._update_unsub = async_track_time_interval(
-            self.hass, self._periodic_update, timedelta(seconds=5)
+            self.hass, self._periodic_update, timedelta(seconds=self._update_interval)
         )
 
     def _stop_periodic_update(self) -> None:
@@ -388,3 +417,17 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self.async_write_ha_state()
         # Re-evaluate demand state after external relay change
         await self._apply_demand_logic()
+
+    async def async_check_health(self) -> None:
+        """Check if relay entity is available.
+        
+        Verifies that the configured relay entity exists and has a valid state.
+        
+        Raises:
+            Exception: If relay entity is not available.
+        """
+        relay_state = self.hass.states.get(self._relay_entity)
+        if relay_state is None:
+            raise Exception(
+                f"Relay entity {self._relay_entity} not available"
+            )
