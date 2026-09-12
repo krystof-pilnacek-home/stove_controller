@@ -5,12 +5,11 @@ replacing the external input_boolean.stove_demand helper.
 """
 
 import logging
-from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.const import STATE_ON
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -84,9 +83,11 @@ class StoveDemandSwitch(SwitchEntity, RestoreEntity):
             entity_id = getattr(self, "entity_id", None) or self._attr_unique_id
             self.hass.bus.async_fire(
                 STOVE_DEMAND_CHANGED,
-                {"entry_id": self._entry_id, "demand_on": self._is_on, "entity_id": entity_id},
+                {
+                    "entry_id": self._entry_id,
+                    "demand_on": self._is_on,
+                    "entity_id": entity_id,
+                },
             )
         except Exception as e:
-            _LOGGER.error(
-                "Failed to fire demand change event: %s", e
-            )
+            _LOGGER.error("Failed to fire demand change event: %s", e)

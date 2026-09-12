@@ -1,23 +1,18 @@
 """Test config flow for Stove Controller integration."""
 
-from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 import pytest
 
 from stove_controller.config_flow import (
-    StoveControllerConfigFlow,
-    StoveControllerOptionsFlow,
     CONFIG_SCHEMA,
     OPTIONS_SCHEMA,
+    StoveControllerConfigFlow,
+    StoveControllerOptionsFlow,
 )
 from stove_controller.const import (
-    DOMAIN,
-    CONF_RELAY_ENTITY,
-    CONF_MIN_ON_DURATION,
     CONF_MIN_OFF_DURATION,
+    CONF_MIN_ON_DURATION,
+    CONF_RELAY_ENTITY,
     CONF_UPDATE_INTERVAL,
-    DEFAULT_MIN_ON_DURATION,
-    DEFAULT_MIN_OFF_DURATION,
-    DEFAULT_UPDATE_INTERVAL,
 )
 
 
@@ -70,5 +65,3 @@ class TestStoveControllerOptionsFlow:
     def flow(self):
         """Create an options flow instance."""
         return StoveControllerOptionsFlow()
-
-

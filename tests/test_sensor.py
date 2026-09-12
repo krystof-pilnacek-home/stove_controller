@@ -1,24 +1,24 @@
 """Test sensor platform for Stove Controller integration."""
 
-from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.util import dt as dt_util
 
+from stove_controller.const import (
+    DOMAIN,
+    STATE_HEATING,
+    STATE_IDLE,
+    STATE_PENDING_OFF,
+    STATE_PENDING_ON,
+)
 from stove_controller.sensor import (
     StoveControllerSensor,
     StoveLastOffSensor,
     StoveLastOnSensor,
     StoveRemainingTimeSensor,
     async_setup_entry,
-)
-from stove_controller.const import (
-    DOMAIN,
-    STATE_IDLE,
-    STATE_HEATING,
-    STATE_PENDING_ON,
-    STATE_PENDING_OFF,
 )
 
 
@@ -252,7 +252,9 @@ class TestAsyncSetupEntry:
         assert isinstance(entities[3], StoveLastOffSensor)
 
     @pytest.mark.asyncio
-    async def test_setup_entry_with_options(self, mock_hass, mock_config_entry_with_options):
+    async def test_setup_entry_with_options(
+        self, mock_hass, mock_config_entry_with_options
+    ):
         """Test setting up sensor with options overriding defaults."""
         async_add_entities = MagicMock()
         mock_hass.data = {}

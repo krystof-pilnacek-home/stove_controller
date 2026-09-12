@@ -33,7 +33,9 @@ CONFIG_SCHEMA = vol.Schema(
             CONF_MIN_ON_DURATION, default=DEFAULT_MIN_ON_DURATION
         ): NumberSelector(
             NumberSelectorConfig(
-                min=1, max=180, step=1,
+                min=1,
+                max=180,
+                step=1,
                 unit_of_measurement="min",
                 mode=NumberSelectorMode.BOX,
             )
@@ -42,7 +44,9 @@ CONFIG_SCHEMA = vol.Schema(
             CONF_MIN_OFF_DURATION, default=DEFAULT_MIN_OFF_DURATION
         ): NumberSelector(
             NumberSelectorConfig(
-                min=1, max=180, step=1,
+                min=1,
+                max=180,
+                step=1,
                 unit_of_measurement="min",
                 mode=NumberSelectorMode.BOX,
             )
@@ -54,14 +58,18 @@ OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_MIN_ON_DURATION): NumberSelector(
             NumberSelectorConfig(
-                min=1, max=180, step=1,
+                min=1,
+                max=180,
+                step=1,
                 unit_of_measurement="min",
                 mode=NumberSelectorMode.BOX,
             )
         ),
         vol.Required(CONF_MIN_OFF_DURATION): NumberSelector(
             NumberSelectorConfig(
-                min=1, max=180, step=1,
+                min=1,
+                max=180,
+                step=1,
                 unit_of_measurement="min",
                 mode=NumberSelectorMode.BOX,
             )
@@ -70,7 +78,9 @@ OPTIONS_SCHEMA = vol.Schema(
             CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
         ): NumberSelector(
             NumberSelectorConfig(
-                min=1, max=60, step=1,
+                min=1,
+                max=60,
+                step=1,
                 unit_of_measurement="s",
                 mode=NumberSelectorMode.BOX,
             )
@@ -89,12 +99,8 @@ class StoveControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
         if user_input is not None:
-            return self.async_create_entry(
-                title="Stove Controller", data=user_input
-            )
-        return self.async_show_form(
-            step_id="user", data_schema=CONFIG_SCHEMA
-        )
+            return self.async_create_entry(title="Stove Controller", data=user_input)
+        return self.async_show_form(step_id="user", data_schema=CONFIG_SCHEMA)
 
     @classmethod
     @callback

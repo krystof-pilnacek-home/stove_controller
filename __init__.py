@@ -17,7 +17,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Stove Controller from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {}
-    
+
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -32,7 +32,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await sensor.sync_demand(switch.is_on, switch.entity_id)
         except Exception as e:
             _LOGGER.debug(
-                "Failed to sync demand state on setup (will retry in sensor.async_added_to_hass): %s", e
+                ("Failed to sync demand state on setup "
+                 "(will retry in sensor.async_added_to_hass): %s"),
+                e,
             )
 
     return True

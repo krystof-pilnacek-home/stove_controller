@@ -1,9 +1,10 @@
 """Test __init__.py for Stove Controller integration."""
 
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from stove_controller import async_setup_entry, async_unload_entry, PLATFORMS
+from stove_controller import async_setup_entry, async_unload_entry
 from stove_controller.const import DOMAIN
 
 
@@ -51,7 +52,9 @@ class TestAsyncSetupEntry:
         assert call_args[0][1] == "switch.stove_demand"
 
     @pytest.mark.asyncio
-    async def test_setup_entry_no_sync_without_switch_or_sensor(self, mock_hass, mock_config_entry):
+    async def test_setup_entry_no_sync_without_switch_or_sensor(
+        self, mock_hass, mock_config_entry
+    ):
         """Test that setup doesn't fail when switch or sensor is not available."""
         mock_hass.data = {DOMAIN: {mock_config_entry.entry_id: {}}}
         mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -97,6 +100,3 @@ class TestAsyncUnloadEntry:
         result = await async_unload_entry(mock_hass, mock_config_entry)
 
         assert result is True
-
-
-

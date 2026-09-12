@@ -1,10 +1,10 @@
 """Fixtures for Stove Controller tests."""
 
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
+
 import pytest
-from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON, STATE_OFF
+from homeassistant.core import HomeAssistant
 
 
 @pytest.fixture

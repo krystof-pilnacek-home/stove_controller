@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable, Optional
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -101,12 +102,12 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
         self._state: str = STATE_IDLE
         self._demand_on: bool = False
-        self._demand_entity_id: Optional[str] = None
-        self._last_on: Optional[datetime] = None
-        self._last_off: Optional[datetime] = None
-        self._wait_until: Optional[datetime] = None
-        self._wait_task: Optional[asyncio.Task] = None
-        self._update_unsub: Optional[Callable] = None
+        self._demand_entity_id: str | None = None
+        self._last_on: datetime | None = None
+        self._last_off: datetime | None = None
+        self._wait_until: datetime | None = None
+        self._wait_task: asyncio.Task | None = None
+        self._update_unsub: Callable | None = None
         self._sub_sensors: list[SensorEntity] = []
 
     @property
@@ -140,7 +141,12 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
         # Restore state from previous state
         if (last_state := await self.async_get_last_state()) is not None:
-            valid_states = {STATE_IDLE, STATE_HEATING, STATE_PENDING_ON, STATE_PENDING_OFF}
+            valid_states = {
+                STATE_IDLE,
+                STATE_HEATING,
+                STATE_PENDING_ON,
+                STATE_PENDING_OFF,
+            }
             if last_state.state in valid_states:
                 self._state = last_state.state
             else:
@@ -152,9 +158,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             if "demand_on" in last_state.attributes:
                 self._demand_on = bool(last_state.attributes["demand_on"])
             if "last_on" in last_state.attributes:
-                self._last_on = dt_util.parse_datetime(
-                    last_state.attributes["last_on"]
-                )
+                self._last_on = dt_util.parse_datetime(last_state.attributes["last_on"])
             if "last_off" in last_state.attributes:
                 self._last_off = dt_util.parse_datetime(
                     last_state.attributes["last_off"]
@@ -164,12 +168,17 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                     last_state.attributes["wait_until"]
                 )
                 # Recalculate remaining time and restart wait if needed
-                if self._wait_until and self._state in (STATE_PENDING_ON, STATE_PENDING_OFF):
+                if self._wait_until and self._state in (
+                    STATE_PENDING_ON,
+                    STATE_PENDING_OFF,
+                ):
                     remaining = (self._wait_until - dt_util.now()).total_seconds()
                     if remaining > 0:
                         self._start_wait(
                             remaining,
-                            self._do_turn_on if self._state == STATE_PENDING_ON else self._do_turn_off
+                            self._do_turn_on
+                            if self._state == STATE_PENDING_ON
+                            else self._do_turn_off,
                         )
 
         # Listen for demand change events from the switch
@@ -201,7 +210,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._cancel_wait()
         await self._apply_demand_logic()
 
-    async def sync_demand(self, demand_on: bool, demand_entity_id: Optional[str] = None) -> None:
+    async def sync_demand(
+        self, demand_on: bool, demand_entity_id: str | None = None
+    ) -> None:
         """Sync demand state from the switch after setup (backwards compatibility)."""
         self._demand_on = demand_on
         if demand_entity_id is not None:
@@ -222,7 +233,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._cancel_wait()
         await self._apply_demand_logic()
 
-    def _get_state(self, entity_id: str) -> Optional[str]:
+    def _get_state(self, entity_id: str) -> str | None:
         """Get entity state string safely."""
         state = self.hass.states.get(entity_id)
         return state.state if state else None
@@ -250,7 +261,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             if getattr(sub, "entity_id", None) is not None:
                 sub.async_write_ha_state()
 
-    def _compute_remaining(self, last_time: Optional[datetime], min_duration: int) -> int:
+    def _compute_remaining(
+        self, last_time: datetime | None, min_duration: int
+    ) -> int:
         """Compute remaining wait time in seconds.
 
         If last_time is None, returns full min_duration (forces wait on first use).
@@ -300,12 +313,14 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             self._update_unsub = None
 
     @callback
-    def _periodic_update(self, _now: Optional[datetime] = None) -> None:
+    def _periodic_update(self, _now: datetime | None = None) -> None:
         """Refresh state to update the countdown attribute."""
         self.async_write_ha_state()
         self._update_sub_sensors()
 
-    async def _wait_and_execute(self, duration_sec: int, callback_func: Callable[[], Any]) -> None:
+    async def _wait_and_execute(
+        self, duration_sec: int, callback_func: Callable[[], Any]
+    ) -> None:
         """Wait for the specified duration, then execute the callback."""
         try:
             await asyncio.sleep(duration_sec)
@@ -317,9 +332,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             _LOGGER.debug("Wait task cancelled")
             raise
         except Exception as e:
-            _LOGGER.exception(
-                "Unexpected error in stove controller wait task: %s", e
-            )
+            _LOGGER.exception("Unexpected error in stove controller wait task: %s", e)
             self._wait_task = None
             self._wait_until = None
             self._stop_periodic_update()
@@ -339,9 +352,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                 )
                 self._set_state(STATE_HEATING)
             except Exception as e:
-                _LOGGER.error(
-                    "Failed to turn on relay %s: %s", self._relay_entity, e
-                )
+                _LOGGER.error("Failed to turn on relay %s: %s", self._relay_entity, e)
                 # Re-evaluate state - demand is still on, but relay didn't turn on
                 await self._apply_demand_logic()
         else:
@@ -360,9 +371,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                 )
                 self._set_state(STATE_IDLE)
             except Exception as e:
-                _LOGGER.error(
-                    "Failed to turn off relay %s: %s", self._relay_entity, e
-                )
+                _LOGGER.error("Failed to turn off relay %s: %s", self._relay_entity, e)
                 # Re-evaluate state - demand is still off, but relay didn't turn off
                 await self._apply_demand_logic()
         else:
@@ -378,9 +387,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
         if self._demand_on and not relay_on:
             # Demand is ON but relay is OFF - need to turn relay on
-            remaining = self._compute_remaining(
-                self._last_off, self._min_off_duration
-            )
+            remaining = self._compute_remaining(self._last_off, self._min_off_duration)
             if remaining > 0:
                 self._set_state(STATE_PENDING_ON)
                 self._start_wait(remaining, self._do_turn_on)
@@ -388,9 +395,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                 await self._do_turn_on()
         elif not self._demand_on and relay_on:
             # Demand is OFF but relay is ON - need to turn relay off
-            remaining = self._compute_remaining(
-                self._last_on, self._min_on_duration
-            )
+            remaining = self._compute_remaining(self._last_on, self._min_on_duration)
             if remaining > 0:
                 self._set_state(STATE_PENDING_OFF)
                 self._start_wait(remaining, self._do_turn_off)
@@ -450,9 +455,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """
         relay_state = self.hass.states.get(self._relay_entity)
         if relay_state is None:
-            raise Exception(
-                f"Relay entity {self._relay_entity} not available"
-            )
+            raise Exception(f"Relay entity {self._relay_entity} not available")
 
 
 class StoveRemainingTimeSensor(SensorEntity):
@@ -501,7 +504,7 @@ class StoveLastOnSensor(SensorEntity):
         )
 
     @property
-    def native_value(self) -> Optional[datetime]:
+    def native_value(self) -> datetime | None:
         """Return the last-on timestamp."""
         return self._controller._last_on
 
@@ -526,6 +529,6 @@ class StoveLastOffSensor(SensorEntity):
         )
 
     @property
-    def native_value(self) -> Optional[datetime]:
+    def native_value(self) -> datetime | None:
         """Return the last-off timestamp."""
         return self._controller._last_off

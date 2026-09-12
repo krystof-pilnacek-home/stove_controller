@@ -6,7 +6,7 @@ and simple cases where no wait is necessary.
 Scenarios:
 - S1: Simple ON/OFF with no delays
 - S2: ON with min_off delay
-- S3: OFF with min_on delay  
+- S3: OFF with min_on delay
 - S4: Demand reversal during wait
 - S5: Boundary conditions (exactly at min_duration)
 - S6: State restoration with timers
@@ -14,28 +14,27 @@ Scenarios:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.const import STATE_ON, STATE_OFF
-from homeassistant.util import dt as dt_util
+from homeassistant.const import STATE_OFF, STATE_ON
 
-from stove_controller.sensor import StoveControllerSensor
 from stove_controller.const import (
     DOMAIN,
-    STATE_IDLE,
     STATE_HEATING,
-    STATE_PENDING_ON,
+    STATE_IDLE,
     STATE_PENDING_OFF,
+    STATE_PENDING_ON,
 )
-
+from stove_controller.sensor import StoveControllerSensor
 
 # Helpers
 
+
 def _now() -> datetime:
     """Fixed timestamp for consistent testing."""
-    return datetime(2026, 1, 15, 20, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, 15, 20, 0, 0, tzinfo=UTC)
 
 
 def _make_sensor(
@@ -73,6 +72,7 @@ def _setup_sensor_hass(sensor: StoveControllerSensor) -> MagicMock:
 # =============================================================================
 # Scenario 1: Simple Cases - No Wait Needed
 # =============================================================================
+
 
 class TestScenario1SimpleCases:
     """Simple cases where no wait is necessary."""
@@ -164,6 +164,7 @@ class TestScenario1SimpleCases:
 # Scenario 2: Wait Triggered Cases
 # =============================================================================
 
+
 class TestScenario2WaitTriggered:
     """Cases where wait timers are triggered."""
 
@@ -243,7 +244,9 @@ class TestScenario2WaitTriggered:
         sensor._stop_periodic_update()
 
         hass.services.async_call.reset_mock()
-        with patch("homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)):
+        with patch(
+            "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
+        ):
             await sensor._do_turn_on()
 
         assert sensor._state == STATE_HEATING
@@ -271,9 +274,10 @@ class TestScenario2WaitTriggered:
         sensor._stop_periodic_update()
 
         hass.services.async_call.reset_mock()
-        with patch("homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)):
+        with patch(
+            "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
+        ):
             await sensor._do_turn_off()
-
 
         assert sensor._state == STATE_IDLE
         hass.services.async_call.assert_awaited_once()
@@ -282,6 +286,7 @@ class TestScenario2WaitTriggered:
 # =============================================================================
 # Scenario 3: Demand Reversal During Wait
 # =============================================================================
+
 
 class TestScenario3DemandReversal:
     """Cases where demand changes back during wait period."""
@@ -341,12 +346,15 @@ class TestScenario3DemandReversal:
 # Scenario 3b: Demand Changes At Timer Completion
 # =============================================================================
 
+
 class TestScenario3bDemandAtTimerCompletion:
     """Cases where demand changes at the exact moment wait timer completes."""
 
     @pytest.mark.asyncio
     async def test_pending_off_completes_but_demand_on(self):
-        """PENDING_OFF wait completes, but demand changed to ON -> go to HEATING, no turn_off."""
+        """PENDING_OFF wait completes,
+        but demand changed to ON -> go to HEATING, no turn_off.
+        """
         sensor = _make_sensor(min_on_min=30)
         hass = _setup_sensor_hass(sensor)
 
@@ -367,20 +375,27 @@ class TestScenario3bDemandAtTimerCompletion:
 
         # Now simulate wait completion (even though demand is now ON)
         # The _do_turn_off should check demand_on and not turn off
-        with patch("homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)):
+        with patch(
+            "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
+        ):
             await sensor._do_turn_off()
 
         # Should NOT have called turn_off service
         # Should have set HEATING state
         assert sensor._state == STATE_HEATING
         # Count how many times turn_off was called (should be 0)
-        turn_off_calls = [c for c in hass.services.async_call.await_args_list 
-                         if len(c[0]) > 1 and c[0][1] == "turn_off"]
+        turn_off_calls = [
+            c
+            for c in hass.services.async_call.await_args_list
+            if len(c[0]) > 1 and c[0][1] == "turn_off"
+        ]
         assert len(turn_off_calls) == 0
 
     @pytest.mark.asyncio
     async def test_pending_on_completes_but_demand_off(self):
-        """PENDING_ON wait completes, but demand changed to OFF -> go to IDLE, no turn_on."""
+        """PENDING_ON wait completes,
+        but demand changed to OFF -> go to IDLE, no turn_on.
+        """
         sensor = _make_sensor(min_off_min=25)
         hass = _setup_sensor_hass(sensor)
 
@@ -401,21 +416,27 @@ class TestScenario3bDemandAtTimerCompletion:
 
         # Now simulate wait completion (even though demand is now OFF)
         # The _do_turn_on should check demand_on and not turn on
-        with patch("homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)):
+        with patch(
+            "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
+        ):
             await sensor._do_turn_on()
 
         # Should NOT have called turn_on service
         # Should have set IDLE state
         assert sensor._state == STATE_IDLE
         # Count how many times turn_on was called (should be 0)
-        turn_on_calls = [c for c in hass.services.async_call.await_args_list 
-                        if len(c[0]) > 1 and c[0][1] == "turn_on"]
+        turn_on_calls = [
+            c
+            for c in hass.services.async_call.await_args_list
+            if len(c[0]) > 1 and c[0][1] == "turn_on"
+        ]
         assert len(turn_on_calls) == 0
 
 
 # =============================================================================
 # Scenario 4: Boundary Conditions
 # =============================================================================
+
 
 class TestScenario4Boundaries:
     """Edge cases at exact duration boundaries."""
@@ -503,6 +524,7 @@ class TestScenario4Boundaries:
 # Scenario 5: Evaluate State Wait Scenarios
 # =============================================================================
 
+
 class TestScenario5EvaluateState:
     """Test _evaluate_state which also handles wait scenarios."""
 
@@ -564,6 +586,7 @@ class TestScenario5EvaluateState:
 # Scenario 6: Compute Remaining Helper
 # =============================================================================
 
+
 class TestScenario6ComputeRemaining:
     """Test the _compute_remaining helper method."""
 
@@ -610,6 +633,7 @@ class TestScenario6ComputeRemaining:
 # =============================================================================
 # Scenario 7: Rapid Demand Changes
 # =============================================================================
+
 
 class TestScenario7RapidChanges:
     """Test rapid demand toggling."""
@@ -680,6 +704,7 @@ class TestScenario7RapidChanges:
 # Scenario 8: Additional Coverage Tests
 # =============================================================================
 
+
 class TestScenario8AdditionalCoverage:
     """Additional tests to improve coverage for edge cases."""
 
@@ -687,7 +712,7 @@ class TestScenario8AdditionalCoverage:
     async def test_handle_demand_change_no_change(self):
         """handle_demand_change called with same demand value -> early return."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         # Initial demand is False
         sensor._demand_on = False
@@ -704,7 +729,7 @@ class TestScenario8AdditionalCoverage:
     async def test_sync_demand_calls_evaluate_state(self):
         """sync_demand updates demand and calls _evaluate_state."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         sensor._demand_on = False
         sensor._evaluate_state = AsyncMock()
@@ -719,7 +744,7 @@ class TestScenario8AdditionalCoverage:
     async def test_sync_demand_without_entity_id(self):
         """sync_demand works without demand_entity_id."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         sensor._demand_on = False
         sensor._evaluate_state = AsyncMock()
@@ -752,7 +777,7 @@ class TestScenario8AdditionalCoverage:
     async def test_on_relay_change_on_state(self):
         """_on_relay_change updates last_on when relay turns ON."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         # Set a previous last_off to verify it is preserved
         sensor._last_off = _now() - timedelta(minutes=10)
@@ -773,7 +798,7 @@ class TestScenario8AdditionalCoverage:
     async def test_on_relay_change_off_state(self):
         """_on_relay_change updates last_off when relay turns OFF."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         # Set a previous last_on to verify it is preserved
         sensor._last_on = _now() - timedelta(minutes=10)
@@ -794,7 +819,7 @@ class TestScenario8AdditionalCoverage:
     async def test_on_relay_change_no_new_state(self):
         """_on_relay_change returns early when new_state is None."""
         sensor = _make_sensor()
-        hass = _setup_sensor_hass(sensor)
+        _setup_sensor_hass(sensor)
 
         # Create mock event with no new_state
         mock_event = MagicMock()
@@ -810,6 +835,7 @@ class TestScenario8AdditionalCoverage:
 # =============================================================================
 # Fixtures for Reuse
 # =============================================================================
+
 
 @pytest.fixture
 def sensor():

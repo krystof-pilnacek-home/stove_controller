@@ -17,10 +17,14 @@ DEFAULT_UPDATE_INTERVAL: Final = 5
 
 class ControllerState(StrEnum):
     """States for the stove controller state machine."""
+
     IDLE = "idle"
     HEATING = "heating"
     PENDING_ON = "pending_on"
     PENDING_OFF = "pending_off"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 # Event constants for HA event bus communication

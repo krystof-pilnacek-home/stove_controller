@@ -1,11 +1,12 @@
 """Test switch platform for Stove Controller integration."""
 
-from unittest.mock import MagicMock, AsyncMock, patch
-import pytest
-from homeassistant.const import STATE_ON, STATE_OFF
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from stove_controller.switch import StoveDemandSwitch, async_setup_entry
+import pytest
+from homeassistant.const import STATE_ON
+
 from stove_controller.const import DOMAIN
+from stove_controller.switch import StoveDemandSwitch, async_setup_entry
 
 
 class TestStoveDemandSwitch:
