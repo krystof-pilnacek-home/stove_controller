@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.util import dt as dt_util
-
 from stove_controller.const import (
     DOMAIN,
     STATE_HEATING,

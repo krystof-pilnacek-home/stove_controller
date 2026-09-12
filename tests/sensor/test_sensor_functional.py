@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
-
 from stove_controller.const import (
     STATE_HEATING,
     STATE_IDLE,
@@ -729,7 +728,12 @@ class TestScenario8AdditionalCoverage:
         mock_event = MagicMock()
         mock_new_state = MagicMock()
         mock_new_state.state = STATE_ON
-        mock_event.data = {"new_state": mock_new_state}
+        mock_old_state = MagicMock()
+        mock_old_state.state = STATE_OFF
+        mock_event.data = {
+            "new_state": mock_new_state,
+            "old_state": mock_old_state
+        }
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sensor._on_relay_change(mock_event)
@@ -749,7 +753,12 @@ class TestScenario8AdditionalCoverage:
         mock_event = MagicMock()
         mock_new_state = MagicMock()
         mock_new_state.state = STATE_OFF
-        mock_event.data = {"new_state": mock_new_state}
+        mock_old_state = MagicMock()
+        mock_old_state.state = STATE_ON
+        mock_event.data = {
+            "new_state": mock_new_state,
+            "old_state": mock_old_state
+        }
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sensor._on_relay_change(mock_event)

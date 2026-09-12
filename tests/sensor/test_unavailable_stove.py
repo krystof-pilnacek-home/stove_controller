@@ -12,7 +12,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from stove_controller.const import (
     STATE_HEATING,
     STATE_IDLE,
