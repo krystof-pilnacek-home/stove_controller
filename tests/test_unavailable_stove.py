@@ -110,7 +110,9 @@ class TestServiceFailureRecursion:
             with patch("stove_controller.sensor._LOGGER") as mock_logger:
                 await sensor._wait_and_execute(0, sensor._do_turn_on)
 
-        mock_logger.exception.assert_called()
+        # _do_turn_on catches its own RuntimeError and logs via _LOGGER.error;
+        # the exception never reaches _wait_and_execute's except block.
+        mock_logger.error.assert_called()
         assert sensor._wait_task is None
         assert sensor._wait_until is None
         assert sensor._state in _VALID_STATES

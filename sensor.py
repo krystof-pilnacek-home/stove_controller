@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTime
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import (
@@ -338,8 +338,11 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             self._wait_task = None
             self._wait_until = None
             self._stop_periodic_update()
-            # Re-evaluate state based on current demand
-            await self._apply_demand_logic()
+            # Relay did not change — log and stop. Do not re-enter
+            # _apply_demand_logic because the callback that failed may be
+            # _do_turn_on/_do_turn_off, which would recurse on persistent
+            # service failures.
+            _LOGGER.warning("Wait callback failed; leaving state as-is")
 
     async def _do_turn_on(self) -> None:
         """Turn on the relay if demand is still on."""
@@ -354,8 +357,10 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                 self._set_state(STATE_HEATING)
             except Exception as e:
                 _LOGGER.error("Failed to turn on relay %s: %s", self._relay_entity, e)
-                # Re-evaluate state - demand is still on, but relay didn't turn on
-                await self._apply_demand_logic()
+                # Relay did not change — reflect actual relay state (OFF)
+                # without re-entering _apply_demand_logic, which would
+                # recurse on persistent service failures.
+                self._set_state(STATE_IDLE)
         else:
             self._set_state(STATE_IDLE)
 
@@ -372,8 +377,10 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                 self._set_state(STATE_IDLE)
             except Exception as e:
                 _LOGGER.error("Failed to turn off relay %s: %s", self._relay_entity, e)
-                # Re-evaluate state - demand is still off, but relay didn't turn off
-                await self._apply_demand_logic()
+                # Relay did not change — reflect actual relay state (ON)
+                # without re-entering _apply_demand_logic, which would
+                # recurse on persistent service failures.
+                self._set_state(STATE_HEATING)
         else:
             self._set_state(STATE_HEATING)
 
@@ -459,7 +466,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
 
 class StoveRemainingTimeSensor(SensorEntity):
-    """Sensor showing the remaining anti-short-cycle wait time in seconds."""
+    """Sensor showing the remaining anti-short-cycle wait time in hh:mm:ss format."""
 
     def __init__(self, entry_id: str, controller: StoveControllerSensor) -> None:
         """Initialize the remaining-time sensor."""
@@ -469,8 +476,6 @@ class StoveRemainingTimeSensor(SensorEntity):
         self._attr_unique_id = f"{entry_id}_remaining_time"
         self._attr_icon = "mdi:timer-sand"
         self._attr_should_poll = False
-        self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
-        self._attr_device_class = SensorDeviceClass.DURATION
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
@@ -479,9 +484,12 @@ class StoveRemainingTimeSensor(SensorEntity):
         )
 
     @property
-    def native_value(self) -> int:
-        """Return the remaining wait time in seconds."""
-        return self._controller._get_remaining_seconds()
+    def native_value(self) -> str:
+        """Return the remaining wait time formatted as hh:mm:ss."""
+        seconds = self._controller._get_remaining_seconds()
+        hours, remainder = divmod(seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 class StoveLastOnSensor(SensorEntity):
