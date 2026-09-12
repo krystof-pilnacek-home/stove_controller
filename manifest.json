@@ -1,7 +1,7 @@
 {
   "domain": "stove_controller",
   "name": "Stove Controller",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "documentation": "https://github.com/krystof-pilnacek-home/stove_controller",
   "codeowners": ["@KPilnacek"],
   "config_flow": true,
