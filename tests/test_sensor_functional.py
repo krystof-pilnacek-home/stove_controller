@@ -676,6 +676,131 @@ class TestScenario7RapidChanges:
 
 
 # =============================================================================
+# Scenario 8: Additional Coverage Tests
+# =============================================================================
+
+class TestScenario8AdditionalCoverage:
+    """Additional tests to improve coverage for edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_handle_demand_change_no_change(self):
+        """handle_demand_change called with same demand value -> early return."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        # Initial demand is False
+        sensor._demand_on = False
+        
+        # Call with same value
+        await sensor.handle_demand_change(demand_on=False)
+        
+        # Should return early, no state change
+        assert sensor._demand_on is False
+        # async_write_ha_state should not be called
+        sensor.async_write_ha_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sync_demand_calls_evaluate_state(self):
+        """sync_demand updates demand and calls _evaluate_state."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        sensor._demand_on = False
+        sensor._evaluate_state = AsyncMock()
+        
+        await sensor.sync_demand(demand_on=True, demand_entity_id="switch.test")
+        
+        assert sensor._demand_on is True
+        assert sensor._demand_entity_id == "switch.test"
+        sensor._evaluate_state.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_sync_demand_without_entity_id(self):
+        """sync_demand works without demand_entity_id."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        sensor._demand_on = False
+        sensor._evaluate_state = AsyncMock()
+        
+        await sensor.sync_demand(demand_on=True)
+        
+        assert sensor._demand_on is True
+        assert sensor._demand_entity_id is None
+        sensor._evaluate_state.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_state_relay_not_available(self):
+        """_evaluate_state when relay entity is not yet available."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        # Mock relay_state to return None (not available)
+        hass.states.get.return_value = None
+        sensor._demand_on = True
+        
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            with patch("stove_controller.sensor._LOGGER") as mock_logger:
+                await sensor._evaluate_state()
+        
+        # Should set to IDLE and log warning
+        assert sensor._state == STATE_IDLE
+        mock_logger.warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_relay_change_on_state(self):
+        """_on_relay_change updates last_on when relay turns ON."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        # Create mock event with new_state = ON
+        mock_event = MagicMock()
+        mock_new_state = MagicMock()
+        mock_new_state.state = STATE_ON
+        mock_event.data = {"new_state": mock_new_state}
+        
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sensor._on_relay_change(mock_event)
+        
+        assert sensor._last_on == _now()
+        assert sensor._last_off is None
+
+    @pytest.mark.asyncio
+    async def test_on_relay_change_off_state(self):
+        """_on_relay_change updates last_off when relay turns OFF."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        # Create mock event with new_state = OFF
+        mock_event = MagicMock()
+        mock_new_state = MagicMock()
+        mock_new_state.state = STATE_OFF
+        mock_event.data = {"new_state": mock_new_state}
+        
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sensor._on_relay_change(mock_event)
+        
+        assert sensor._last_off == _now()
+        assert sensor._last_on is None
+
+    @pytest.mark.asyncio
+    async def test_on_relay_change_no_new_state(self):
+        """_on_relay_change returns early when new_state is None."""
+        sensor = _make_sensor()
+        hass = _setup_sensor_hass(sensor)
+        
+        # Create mock event with no new_state
+        mock_event = MagicMock()
+        mock_event.data = {"new_state": None}
+        
+        await sensor._on_relay_change(mock_event)
+        
+        # Should return early, no timestamps updated
+        assert sensor._last_on is None
+        assert sensor._last_off is None
+
+
+# =============================================================================
 # Fixtures for Reuse
 # =============================================================================
 
