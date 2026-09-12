@@ -117,7 +117,7 @@ class StoveControllerOptionsFlow(config_entries.OptionsFlowWithReload):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = {**self.config_entry.data, **(self.config_entry.options or {})}
+        current = {**self.config_entry.data, **self.config_entry.options}
         suggested_values = {
             CONF_MIN_ON_DURATION: current.get(
                 CONF_MIN_ON_DURATION, DEFAULT_MIN_ON_DURATION

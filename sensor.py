@@ -41,7 +41,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable
 ) -> None:
     """Set up the Stove Controller sensor."""
-    data = {**entry.data, **(entry.options or {})}
+    data = {**entry.data, **entry.options}
     relay_entity = data[CONF_RELAY_ENTITY]
     min_on_min = data.get(CONF_MIN_ON_DURATION, DEFAULT_MIN_ON_DURATION)
     min_off_min = data.get(CONF_MIN_OFF_DURATION, DEFAULT_MIN_OFF_DURATION)
@@ -135,7 +135,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             attrs["last_off"] = self._last_off.isoformat()
         return attrs
 
-    async def async_added_to_hass(self):
+    async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
         await super().async_added_to_hass()
 
@@ -172,7 +172,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                     STATE_PENDING_ON,
                     STATE_PENDING_OFF,
                 ):
-                    remaining = (self._wait_until - dt_util.now()).total_seconds()
+                    remaining = int(
+                        (self._wait_until - dt_util.now()).total_seconds()
+                    )
                     if remaining > 0:
                         self._start_wait(
                             remaining,
@@ -348,7 +350,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                     "turn_on",
                     target={"entity_id": self._relay_entity},
                     blocking=True,
-                    timeout=10,
                 )
                 self._set_state(STATE_HEATING)
             except Exception as e:
@@ -367,7 +368,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                     "turn_off",
                     target={"entity_id": self._relay_entity},
                     blocking=True,
-                    timeout=10,
                 )
                 self._set_state(STATE_IDLE)
             except Exception as e:
