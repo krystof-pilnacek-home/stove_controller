@@ -1,5 +1,7 @@
 """Config flow for the Stove Controller integration."""
 
+from typing import Any
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
@@ -69,9 +71,9 @@ OPTIONS_SCHEMA = vol.Schema(
 class StoveControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Stove Controller."""
 
-    VERSION = 1
+    VERSION: int = 1
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
         """Handle the initial step."""
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
@@ -83,9 +85,9 @@ class StoveControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=CONFIG_SCHEMA
         )
 
-    @staticmethod
+    @classmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(cls, config_entry):
         """Get the options flow."""
         return StoveControllerOptionsFlow()
 
@@ -93,12 +95,12 @@ class StoveControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class StoveControllerOptionsFlow(config_entries.OptionsFlowWithReload):
     """Handle options flow with automatic reload on change."""
 
-    async def async_step_init(self, user_input=None):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         """Manage options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = {**self.config_entry.data, **self.config_entry.options}
+        current = {**self.config_entry.data, **(self.config_entry.options or {})}
         suggested_values = {
             CONF_MIN_ON_DURATION: current.get(
                 CONF_MIN_ON_DURATION, DEFAULT_MIN_ON_DURATION

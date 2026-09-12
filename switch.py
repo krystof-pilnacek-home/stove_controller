@@ -8,7 +8,7 @@ import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -23,7 +23,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Stove Demand switch."""
     switch = StoveDemandSwitch(entry.entry_id)
-    hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})["switch"] = switch
+    store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
+    store["switch"] = switch
     async_add_entities([switch])
 
 
@@ -60,6 +61,8 @@ class StoveDemandSwitch(SwitchEntity, RestoreEntity):
         await super().async_added_to_hass()
         if (last_state := await self.async_get_last_state()) is not None:
             self._is_on = last_state.state == STATE_ON
+        else:
+            self._is_on = False
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn on demand."""
@@ -78,7 +81,12 @@ class StoveDemandSwitch(SwitchEntity, RestoreEntity):
         store = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         sensor = store.get("sensor")
         if sensor is not None:
-            await sensor.handle_demand_change(self._is_on)
+            try:
+                await sensor.handle_demand_change(self._is_on)
+            except Exception as e:
+                _LOGGER.error(
+                    "Failed to notify sensor of demand change: %s", e
+                )
         else:
             _LOGGER.warning(
                 "Stove controller sensor not available; demand change "

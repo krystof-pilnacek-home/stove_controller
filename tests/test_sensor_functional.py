@@ -513,8 +513,7 @@ class TestScenario5EvaluateState:
         
         # Set up state: demand ON, relay OFF, recent last_off
         sensor._demand_on = True
-        hass.states.get.return_value = MagicMock()
-        hass.states.get.return_value.state = STATE_OFF
+        hass.states.is_state.return_value = False  # relay is OFF
         sensor._last_off = _now() - timedelta(minutes=10)
         
         with patch("homeassistant.util.dt.now", return_value=_now()):
