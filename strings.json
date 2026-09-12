@@ -33,6 +33,15 @@
           "pending_on": "Pending On",
           "pending_off": "Pending Off"
         }
+      },
+      "stove_remaining_time": {
+        "name": "Stove Remaining Time"
+      },
+      "stove_last_on": {
+        "name": "Stove Last On"
+      },
+      "stove_last_off": {
+        "name": "Stove Last Off"
       }
     },
     "switch": {

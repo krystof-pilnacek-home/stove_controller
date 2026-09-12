@@ -6,7 +6,13 @@ import pytest
 from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.util import dt as dt_util
 
-from stove_controller.sensor import StoveControllerSensor, async_setup_entry
+from stove_controller.sensor import (
+    StoveControllerSensor,
+    StoveLastOffSensor,
+    StoveLastOnSensor,
+    StoveRemainingTimeSensor,
+    async_setup_entry,
+)
 from stove_controller.const import (
     DOMAIN,
     STATE_IDLE,
@@ -239,8 +245,11 @@ class TestAsyncSetupEntry:
 
         async_add_entities.assert_called_once()
         entities = async_add_entities.call_args[0][0]
-        assert len(entities) == 1
+        assert len(entities) == 4
         assert isinstance(entities[0], StoveControllerSensor)
+        assert isinstance(entities[1], StoveRemainingTimeSensor)
+        assert isinstance(entities[2], StoveLastOnSensor)
+        assert isinstance(entities[3], StoveLastOffSensor)
 
     @pytest.mark.asyncio
     async def test_setup_entry_with_options(self, mock_hass, mock_config_entry_with_options):

@@ -5,9 +5,9 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON, UnitOfTime
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import (
@@ -49,15 +49,23 @@ async def async_setup_entry(
     sensor = StoveControllerSensor(
         entry.entry_id, relay_entity, min_on_min, min_off_min, update_interval
     )
+
+    # Create subordinate sensors that surface on the device page
+    remaining_sensor = StoveRemainingTimeSensor(entry.entry_id, sensor)
+    last_on_sensor = StoveLastOnSensor(entry.entry_id, sensor)
+    last_off_sensor = StoveLastOffSensor(entry.entry_id, sensor)
+
+    sensor._sub_sensors = [remaining_sensor, last_on_sensor, last_off_sensor]
+
     # Store reference for backwards compatibility with __init__.py sync
     store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     store["sensor"] = sensor
-    async_add_entities([sensor])
+    async_add_entities([sensor, remaining_sensor, last_on_sensor, last_off_sensor])
 
 
 class StoveControllerSensor(RestoreEntity, SensorEntity):
     """Sensor that controls the stove relay with anti-short-cycle logic.
-    
+
     Manages a state machine with anti-short-cycle protection:
     - IDLE: No demand, relay off
     - HEATING: Demand on, relay on
@@ -99,6 +107,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._wait_until: Optional[datetime] = None
         self._wait_task: Optional[asyncio.Task] = None
         self._update_unsub: Optional[Callable] = None
+        self._sub_sensors: list[SensorEntity] = []
 
     @property
     def native_value(self) -> str:
@@ -115,7 +124,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             "min_off_duration_min": int(self._min_off_duration / 60),
             "update_interval_sec": self._update_interval,
             "in_grace_period": self._state in (STATE_PENDING_ON, STATE_PENDING_OFF),
-            "time_remaining_sec": 0,
+            "time_remaining_sec": self._get_remaining_seconds(),
         }
         if self._demand_entity_id:
             attrs["demand_entity"] = self._demand_entity_id
@@ -123,9 +132,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             attrs["last_on"] = self._last_on.isoformat()
         if self._last_off:
             attrs["last_off"] = self._last_off.isoformat()
-        if self._wait_until:
-            remaining = (self._wait_until - dt_util.now()).total_seconds()
-            attrs["time_remaining_sec"] = max(0, int(remaining))
         return attrs
 
     async def async_added_to_hass(self):
@@ -142,7 +148,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
                     "Invalid restored state: %s, resetting to IDLE", last_state.state
                 )
                 self._state = STATE_IDLE
-            
+
             if "demand_on" in last_state.attributes:
                 self._demand_on = bool(last_state.attributes["demand_on"])
             if "last_on" in last_state.attributes:
@@ -194,6 +200,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._demand_on = demand_on
         self._cancel_wait()
         await self._apply_demand_logic()
+
     async def sync_demand(self, demand_on: bool, demand_entity_id: Optional[str] = None) -> None:
         """Sync demand state from the switch after setup (backwards compatibility)."""
         self._demand_on = demand_on
@@ -228,10 +235,24 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Set state and write."""
         self._state = state
         self.async_write_ha_state()
+        self._update_sub_sensors()
+
+    def _get_remaining_seconds(self) -> int:
+        """Return remaining wait time in seconds (0 when not pending)."""
+        if self._wait_until:
+            remaining = (self._wait_until - dt_util.now()).total_seconds()
+            return max(0, int(remaining))
+        return 0
+
+    def _update_sub_sensors(self) -> None:
+        """Push state updates to subordinate sensor entities."""
+        for sub in self._sub_sensors:
+            if getattr(sub, "entity_id", None) is not None:
+                sub.async_write_ha_state()
 
     def _compute_remaining(self, last_time: Optional[datetime], min_duration: int) -> int:
         """Compute remaining wait time in seconds.
-        
+
         If last_time is None, returns full min_duration (forces wait on first use).
         Otherwise, returns max(0, min_duration - elapsed_seconds).
         """
@@ -250,6 +271,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             return
         self._wait_until = dt_util.now() + timedelta(seconds=duration_sec)
         self.async_write_ha_state()
+        self._update_sub_sensors()
         self._start_periodic_update()
         self._wait_task = asyncio.create_task(
             self._wait_and_execute(duration_sec, callback_func)
@@ -281,6 +303,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
     def _periodic_update(self, _now: Optional[datetime] = None) -> None:
         """Refresh state to update the countdown attribute."""
         self.async_write_ha_state()
+        self._update_sub_sensors()
 
     async def _wait_and_execute(self, duration_sec: int, callback_func: Callable[[], Any]) -> None:
         """Wait for the specified duration, then execute the callback."""
@@ -347,12 +370,12 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
     async def _apply_demand_logic(self) -> None:
         """Apply demand change logic based on current state.
-        
+
         This is the core state transition logic that determines what to do
         based on the current demand and relay state.
         """
         relay_on = self._is_on(self._relay_entity)
-        
+
         if self._demand_on and not relay_on:
             # Demand is ON but relay is OFF - need to turn relay on
             remaining = self._compute_remaining(
@@ -399,30 +422,29 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Handle relay state change - update timestamps and re-evaluate."""
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
-        
+
         # Skip if no state or state hasn't actually changed
         if new_state is None or (old_state and old_state.state == new_state.state):
             return
-        
+
         if new_state.state == STATE_ON:
             self._last_on = dt_util.now()
-            self._last_off = None
         elif new_state.state == STATE_OFF:
             self._last_off = dt_util.now()
-            self._last_on = None
         else:
             _LOGGER.warning("Unknown relay state: %s", new_state.state)
             return
-        
+
         self.async_write_ha_state()
+        self._update_sub_sensors()
         # Re-evaluate demand state after external relay change
         await self._apply_demand_logic()
 
     async def async_check_health(self) -> None:
         """Check if relay entity is available.
-        
+
         Verifies that the configured relay entity exists and has a valid state.
-        
+
         Raises:
             Exception: If relay entity is not available.
         """
@@ -431,3 +453,79 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             raise Exception(
                 f"Relay entity {self._relay_entity} not available"
             )
+
+
+class StoveRemainingTimeSensor(SensorEntity):
+    """Sensor showing the remaining anti-short-cycle wait time in seconds."""
+
+    def __init__(self, entry_id: str, controller: StoveControllerSensor) -> None:
+        """Initialize the remaining-time sensor."""
+        self._entry_id = entry_id
+        self._controller = controller
+        self._attr_name = "Stove Remaining Time"
+        self._attr_unique_id = f"{entry_id}_remaining_time"
+        self._attr_icon = "mdi:timer-sand"
+        self._attr_should_poll = False
+        self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="Stove Controller",
+            manufacturer="Custom",
+            model="A251 Controller",
+        )
+
+    @property
+    def native_value(self) -> int:
+        """Return the remaining wait time in seconds."""
+        return self._controller._get_remaining_seconds()
+
+
+class StoveLastOnSensor(SensorEntity):
+    """Sensor showing when the stove relay was last turned on."""
+
+    def __init__(self, entry_id: str, controller: StoveControllerSensor) -> None:
+        """Initialize the last-on sensor."""
+        self._entry_id = entry_id
+        self._controller = controller
+        self._attr_name = "Stove Last On"
+        self._attr_unique_id = f"{entry_id}_last_on"
+        self._attr_icon = "mdi:clock-start"
+        self._attr_should_poll = False
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="Stove Controller",
+            manufacturer="Custom",
+            model="A251 Controller",
+        )
+
+    @property
+    def native_value(self) -> Optional[datetime]:
+        """Return the last-on timestamp."""
+        return self._controller._last_on
+
+
+class StoveLastOffSensor(SensorEntity):
+    """Sensor showing when the stove relay was last turned off."""
+
+    def __init__(self, entry_id: str, controller: StoveControllerSensor) -> None:
+        """Initialize the last-off sensor."""
+        self._entry_id = entry_id
+        self._controller = controller
+        self._attr_name = "Stove Last Off"
+        self._attr_unique_id = f"{entry_id}_last_off"
+        self._attr_icon = "mdi:clock-end"
+        self._attr_should_poll = False
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="Stove Controller",
+            manufacturer="Custom",
+            model="A251 Controller",
+        )
+
+    @property
+    def native_value(self) -> Optional[datetime]:
+        """Return the last-off timestamp."""
+        return self._controller._last_off
