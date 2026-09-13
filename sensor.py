@@ -217,7 +217,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Refresh state to update the countdown attribute."""
         self.async_write_ha_state()
         self._update_sub_sensors()
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
@@ -330,9 +329,25 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Handle relay state change."""
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
-        if new_state is None or (old_state and old_state.state == new_state.state):
+        
+        # Skip if no new state
+        if new_state is None:
             return
-        await self._state_machine.update_relay_state(new_state.state)
+        
+        # Handle relay appearance event (old_state=None, e.g., HA restart)
+        # Preserve timestamps but re-evaluate demand
+        if old_state is None:
+            await self._state_machine.evaluate()
+            return
+        
+        # Skip if state hasn't actually changed
+        if old_state.state == new_state.state:
+            return
+        
+        # Extract state string
+        new_state_str = new_state.state if hasattr(new_state, 'state') else new_state
+        
+        await self._state_machine.update_relay_state(new_state_str)
 
     async def async_check_health(self) -> None:
         """Check if relay entity is available."""

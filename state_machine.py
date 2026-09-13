@@ -230,14 +230,24 @@ class StoveStateMachine:
 
 
     async def update_relay_state(self, new_state: str) -> None:
-        """Update internal tracking when relay state changes externally."""
+        """Update internal tracking when relay state changes externally.
+
+        Args:
+            new_state: The new relay state.
+        """
         match new_state:
             case "on":
                 self._last_on = dt_util.now()
             case "off":
                 self._last_off = dt_util.now()
             case _:
-                _LOGGER.warning("Unknown relay state: %s", new_state)
+                # Non-ON/non-OFF state (e.g., unavailable, unknown):
+                # transition to IDLE and cancel any pending wait.
+                _LOGGER.warning(
+                    "Unknown relay state: %s, transitioning to IDLE", new_state
+                )
+                self.cancel_wait()
+                await self.transition_to(STATE_IDLE)
                 return
 
         # Pass the new relay state to avoid fetching it again
@@ -407,9 +417,14 @@ class StoveStateMachine:
             return
 
         if self._demand_on:
-            await self._turn_on_relay()
-            if self._state != STATE_HEATING:
-                await self.transition_to(STATE_HEATING)
+            if await self._turn_on_relay():
+                if self._state != STATE_HEATING:
+                    await self.transition_to(STATE_HEATING)
+            else:
+                # Relay did not change due to failure - transition to stable state
+                if self._state != STATE_IDLE:
+                    await self.transition_to(STATE_IDLE)
+                _LOGGER.warning("Turn on failed; transitioned to IDLE")
         else:
             if self._state != STATE_IDLE:
                 await self.transition_to(STATE_IDLE)
@@ -425,38 +440,61 @@ class StoveStateMachine:
             return
 
         if not self._demand_on:
-            await self._turn_off_relay()
-            if self._state != STATE_IDLE:
-                await self.transition_to(STATE_IDLE)
+            if await self._turn_off_relay():
+                if self._state != STATE_IDLE:
+                    await self.transition_to(STATE_IDLE)
+            else:
+                # Relay did not change due to failure - transition to stable state
+                if self._state != STATE_HEATING:
+                    await self.transition_to(STATE_HEATING)
+                _LOGGER.warning("Turn off failed; transitioned to HEATING")
         else:
             if self._state != STATE_HEATING:
                 await self.transition_to(STATE_HEATING)
 
-    async def _turn_on_relay(self) -> None:
-        """Send command to turn on relay."""
+    async def _turn_on_relay(self) -> bool:
+        """Send command to turn on relay.
+        
+        Returns:
+            True if successful, False if failed
+        """
         if self.hass is None:
             # During testing, just update timestamp without HA call
             self._last_on = dt_util.now()
-            return
-        await self.hass.services.async_call(
-            "switch", "turn_on",
-            target={"entity_id": self._relay_entity},
-            blocking=True,
-        )
-        self._last_on = dt_util.now()
+            return True
+        try:
+            await self.hass.services.async_call(
+                "switch", "turn_on",
+                target={"entity_id": self._relay_entity},
+                blocking=True,
+            )
+            self._last_on = dt_util.now()
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to turn on relay %s: %s", self._relay_entity, e)
+            return False
 
-    async def _turn_off_relay(self) -> None:
-        """Send command to turn off relay."""
+    async def _turn_off_relay(self) -> bool:
+        """Send command to turn off relay.
+        
+        Returns:
+            True if successful, False if failed
+        """
         if self.hass is None:
             # During testing, just update timestamp without HA call
             self._last_off = dt_util.now()
-            return
-        await self.hass.services.async_call(
-            "switch", "turn_off",
-            target={"entity_id": self._relay_entity},
-            blocking=True,
-        )
-        self._last_off = dt_util.now()
+            return True
+        try:
+            await self.hass.services.async_call(
+                "switch", "turn_off",
+                target={"entity_id": self._relay_entity},
+                blocking=True,
+            )
+            self._last_off = dt_util.now()
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to turn off relay %s: %s", self._relay_entity, e)
+            return False
 
     async def _apply_demand_logic(self, relay_on: bool | None = None) -> None:
         """Core state transition logic based on demand and relay state.

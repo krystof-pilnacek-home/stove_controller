@@ -737,11 +737,13 @@ class TestScenario8AdditionalCoverage:
         # Set a previous last_off to verify it is preserved
         sensor._last_off = _now() - timedelta(minutes=10)
 
-        # Create mock event with new_state = ON
+        # Create mock event with new_state = ON and old_state = OFF
         mock_event = MagicMock()
         mock_new_state = MagicMock()
         mock_new_state.state = STATE_ON
-        mock_event.data = {"new_state": mock_new_state}
+        mock_old_state = MagicMock()
+        mock_old_state.state = STATE_OFF
+        mock_event.data = {"new_state": mock_new_state, "old_state": mock_old_state}
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sensor._on_relay_change(mock_event)
@@ -757,11 +759,13 @@ class TestScenario8AdditionalCoverage:
         # Set a previous last_on to verify it is preserved
         sensor._last_on = _now() - timedelta(minutes=10)
 
-        # Create mock event with new_state = OFF
+        # Create mock event with new_state = OFF and old_state = ON
         mock_event = MagicMock()
         mock_new_state = MagicMock()
         mock_new_state.state = STATE_OFF
-        mock_event.data = {"new_state": mock_new_state}
+        mock_old_state = MagicMock()
+        mock_old_state.state = STATE_ON
+        mock_event.data = {"new_state": mock_new_state, "old_state": mock_old_state}
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sensor._on_relay_change(mock_event)
