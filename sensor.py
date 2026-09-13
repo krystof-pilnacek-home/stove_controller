@@ -228,10 +228,12 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             return
         demand_on = event.data.get("demand_on")
         demand_entity_id = event.data.get("entity_id")
-        if demand_on is not None:
-            self._demand_on = demand_on
         if demand_entity_id is not None:
             self._demand_entity_id = demand_entity_id
+        if demand_on is None:
+            # Only metadata changed, no demand transition to process
+            return
+        self._demand_on = demand_on
         self._cancel_wait()
         await self._apply_demand_logic()
 
@@ -436,7 +438,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         old_state = event.data.get("old_state")
 
         # Skip if no state or state hasn't actually changed
-        if new_state is None or (old_state and old_state.state == new_state.state):
+        if new_state is None or old_state is None or old_state.state == new_state.state:
             return
 
         if new_state.state == STATE_ON:
