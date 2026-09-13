@@ -119,21 +119,31 @@ class TestRelayChangeNoneOldState:
         assert sensor._last_on is None
 
     @pytest.mark.asyncio
-    async def test_old_state_none_no_state_re_evaluation(self, setup_sensor_hass):
-        """old_state=None: _apply_demand_logic must not be called."""
-        sensor, _ = setup_sensor_hass()
+    async def test_old_state_none_preserves_timestamps_but_recovers_demand(
+        self, setup_sensor_hass
+    ):
+        """old_state=None: timestamps preserved AND demand re-evaluated."""
+        sensor, hass = setup_sensor_hass()
+        original_last_on = _now() - timedelta(minutes=5)
+        sensor._last_on = original_last_on
+        sensor._last_off = None
         sensor._state = STATE_HEATING
         sensor._demand_on = True
+        hass.states.is_state.return_value = True
 
         event = _make_relay_event(new_state_value=STATE_ON, old_state_value=None)
 
         with patch.object(
             sensor, "_apply_demand_logic", new=AsyncMock()
         ) as mock_logic:
-            await sensor._on_relay_change(event)
+            with patch("homeassistant.util.dt.now", return_value=_now()):
+                await sensor._on_relay_change(event)
 
-        # _apply_demand_logic should not be called for old_state=None events
-        mock_logic.assert_not_called()
+        # Timestamps must be preserved (Bug A stays fixed)
+        assert sensor._last_on == original_last_on
+        assert sensor._last_off is None
+        # But demand must be re-evaluated (Bug 2 fix)
+        mock_logic.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_real_state_change_still_updates_timestamps(self, setup_sensor_hass):

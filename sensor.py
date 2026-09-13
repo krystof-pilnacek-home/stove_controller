@@ -340,11 +340,16 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             self._wait_task = None
             self._wait_until = None
             self._stop_periodic_update()
-            # Relay did not change — log and stop. Do not re-enter
-            # _apply_demand_logic because the callback that failed may be
-            # _do_turn_on/_do_turn_off, which would recurse on persistent
+            # Relay did not change — log and transition to stable state.
+            # Do not re-enter _apply_demand_logic because the callback that failed
+            # may be _do_turn_on/_do_turn_off, which would recurse on persistent
             # service failures.
-            _LOGGER.warning("Wait callback failed; leaving state as-is")
+            # If we were in a PENDING state, transition to a stable non-pending state
+            if self._state == STATE_PENDING_ON:
+                self._set_state(STATE_IDLE)
+            elif self._state == STATE_PENDING_OFF:
+                self._set_state(STATE_HEATING)
+            _LOGGER.warning("Wait callback failed; transitioned to stable state")
 
     async def _do_turn_on(self) -> None:
         """Turn on the relay if demand is still on."""
@@ -437,8 +442,18 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
 
-        # Skip if no state or state hasn't actually changed
-        if new_state is None or old_state is None or old_state.state == new_state.state:
+        # Skip if no new state
+        if new_state is None:
+            return
+
+        # Handle relay appearance event (old_state=None, e.g., HA restart)
+        # Preserve timestamps but re-evaluate demand
+        if old_state is None:
+            await self._apply_demand_logic()
+            return
+
+        # Skip if state hasn't actually changed
+        if old_state.state == new_state.state:
             return
 
         if new_state.state == STATE_ON:
@@ -446,7 +461,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         elif new_state.state == STATE_OFF:
             self._last_off = dt_util.now()
         else:
-            _LOGGER.warning("Unknown relay state: %s", new_state.state)
+            # Non-ON/non-OFF state (e.g., unavailable, unknown): transition to IDLE
+            self._cancel_wait()
+            self._set_state(STATE_IDLE)
             return
 
         self.async_write_ha_state()
