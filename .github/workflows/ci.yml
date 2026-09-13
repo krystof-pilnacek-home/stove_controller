@@ -7,19 +7,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - run: pip install -e .[dev]
-      - run: ruff check .
-      - run: mypy .
+      - name: Cache uv dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-
+      - run: uv sync --all-extras --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy .
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - run: pip install -e .[dev]
-      - run: pytest tests/ -v --tb=short
+      - name: Cache uv dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-
+      - run: uv sync --all-extras --frozen
+      - run: uv run pytest tests/ -v --tb=short
