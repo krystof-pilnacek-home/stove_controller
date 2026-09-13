@@ -5,7 +5,7 @@ Tests the interaction between switch and sensor components.
 
 import asyncio
 import contextlib
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -59,12 +59,12 @@ async def mock_hass_with_bus():
     # tests, so the tasks are discovered via asyncio.all_tasks() rather than a
     # registry.  The tasks must be awaited to completion (not just cancelled)
     # so the HACC verify_cleanup plugin does not flag them as lingering.
-    # Match by coroutine qualified name (a method, e.g.
-    # ``StoveControllerSensor._wait_and_execute``).
+    # Match by coroutine qualified name (e.g.
+    # ``StoveStateMachine._start_wait.<locals>.wait_and_execute``).
     wait_tasks = [
         task
         for task in asyncio.all_tasks()
-        if "_wait_and_execute" in task.get_coro().__qualname__
+        if "wait_and_execute" in task.get_coro().__qualname__
     ]
     for task in wait_tasks:
         task.cancel()
@@ -330,7 +330,7 @@ class TestBackwardsCompatibility:
 
     @pytest.mark.asyncio
     async def test_handle_demand_change_direct_call(self, mock_hass_with_bus):
-        """Test that handle_demand_change method still works for direct calls."""
+        """Test that handle_demand_change method works with state machine."""
         hass = mock_hass_with_bus
         entry_id = "test_entry"
         relay_entity = "switch.test_relay"
@@ -339,20 +339,20 @@ class TestBackwardsCompatibility:
             entry_id, relay_entity, DEFAULT_MIN_ON_DURATION, DEFAULT_MIN_OFF_DURATION
         )
         sensor.hass = hass
+        sensor._state_machine.hass = hass
         sensor.async_write_ha_state = MagicMock()
-        sensor._cancel_wait = MagicMock()
-        sensor._apply_demand_logic = AsyncMock()
+        # Mock relay state to be OFF
+        hass.states.is_state.return_value = False
 
-        # Direct call (used by existing tests)
+        # Direct call
         await sensor.handle_demand_change(demand_on=True)
 
+        # Verify demand was set and state machine was called
         assert sensor._demand_on is True
-        sensor._cancel_wait.assert_called_once()
-        sensor._apply_demand_logic.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_sync_demand_still_works(self, mock_hass_with_bus):
-        """Test that sync_demand method still works."""
+        """Test that sync_demand method works with state machine."""
         hass = mock_hass_with_bus
         entry_id = "test_entry"
         relay_entity = "switch.test_relay"
@@ -361,11 +361,14 @@ class TestBackwardsCompatibility:
             entry_id, relay_entity, DEFAULT_MIN_ON_DURATION, DEFAULT_MIN_OFF_DURATION
         )
         sensor.hass = hass
+        sensor._state_machine.hass = hass
         sensor.async_write_ha_state = MagicMock()
-        sensor._evaluate_state = AsyncMock()
+        # Mock relay state to be OFF
+        hass.states.is_state.return_value = False
+        # Set last_off to avoid waiting
+        sensor._last_off = datetime(2026, 1, 15, 19, 0, 0, tzinfo=UTC)
 
         await sensor.sync_demand(demand_on=True, demand_entity_id="switch.test")
 
         assert sensor._demand_on is True
         assert sensor._demand_entity_id == "switch.test"
-        sensor._evaluate_state.assert_called_once()

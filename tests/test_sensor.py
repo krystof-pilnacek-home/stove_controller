@@ -121,9 +121,17 @@ class TestSensorLifecycle:
     @pytest.mark.asyncio
     async def test_async_added_to_hass_restores_state(self, sensor):
         """Test that sensor restores state from previous state."""
-        sensor.hass = MagicMock()
+        hass = MagicMock()
+        hass.states = MagicMock()
+        hass.states.get = MagicMock()
+        hass.states.is_state = MagicMock()
+        hass.services = MagicMock()
+        hass.services.async_call = AsyncMock()
+        hass.data = {}
+
+        sensor.hass = hass
+        sensor._state_machine.hass = hass
         sensor.async_on_remove = MagicMock()
-        sensor._evaluate_state = AsyncMock()
 
         mock_state = MagicMock()
         mock_state.state = STATE_HEATING
@@ -148,14 +156,21 @@ class TestSensorLifecycle:
         assert sensor._demand_on is True
         assert sensor._last_on is not None
         assert sensor._last_off is not None
-        sensor._evaluate_state.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_added_to_hass_no_previous_state(self, sensor):
         """Test sensor with no previous state."""
-        sensor.hass = MagicMock()
+        hass = MagicMock()
+        hass.states = MagicMock()
+        hass.states.get = MagicMock()
+        hass.states.is_state = MagicMock()
+        hass.services = MagicMock()
+        hass.services.async_call = AsyncMock()
+        hass.data = {}
+
+        sensor.hass = hass
+        sensor._state_machine.hass = hass
         sensor.async_on_remove = MagicMock()
-        sensor._evaluate_state = AsyncMock()
 
         with patch.object(
             sensor, "async_get_last_state", new_callable=AsyncMock
@@ -165,19 +180,18 @@ class TestSensorLifecycle:
             await sensor.async_added_to_hass()
 
         assert sensor._state == STATE_IDLE
-        sensor._evaluate_state.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_will_remove_from_hass(self, sensor):
         """Test cleanup on removal."""
-        sensor._wait_task = MagicMock()
-        sensor._wait_task.done.return_value = False
+        sensor._state_machine._wait_task = MagicMock()
+        sensor._state_machine._wait_task.done.return_value = False
         sensor._update_unsub = MagicMock()
 
         await sensor.async_will_remove_from_hass()
 
-        assert sensor._wait_task is None
-        assert sensor._wait_until is None
+        assert sensor._state_machine._wait_task is None
+        assert sensor._state_machine._wait_until is None
         assert sensor._update_unsub is None
 
 
@@ -191,7 +205,7 @@ class TestComputeRemaining:
 
     def test_none_last_time_returns_full_duration(self, sensor):
         """Test that None last_time returns full duration."""
-        result = sensor._compute_remaining(None, 100)
+        result = sensor._state_machine.compute_remaining(None, 100)
         assert result == 100
 
     def test_elapsed_less_than_duration(self, sensor):
@@ -200,7 +214,7 @@ class TestComputeRemaining:
         last_time = now - timedelta(seconds=50)
 
         with patch("homeassistant.util.dt.now", return_value=now):
-            result = sensor._compute_remaining(last_time, 100)
+            result = sensor._state_machine.compute_remaining(last_time, 100)
 
         assert result == 50
 
@@ -210,7 +224,7 @@ class TestComputeRemaining:
         last_time = now - timedelta(seconds=150)
 
         with patch("homeassistant.util.dt.now", return_value=now):
-            result = sensor._compute_remaining(last_time, 100)
+            result = sensor._state_machine.compute_remaining(last_time, 100)
 
         assert result == 0
 

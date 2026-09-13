@@ -107,6 +107,7 @@ async def setup_sensor_hass(make_sensor, monkeypatch):
         }
 
         sensor.hass = hass
+        sensor._state_machine.hass = hass
         monkeypatch.setattr(sensor, "async_on_remove", MagicMock())
         monkeypatch.setattr(sensor, "async_write_ha_state", MagicMock())
         monkeypatch.setattr(
@@ -127,7 +128,11 @@ async def setup_sensor_hass(make_sensor, monkeypatch):
         if sensor._wait_task is not None and not sensor._wait_task.done()
     ]
     for sensor in created:
-        sensor._cancel_wait()
+        # The wait timer lives on the state machine after the refactor; the
+        # sensor no longer exposes _cancel_wait.  Stop the periodic countdown
+        # tracker too so no time listener lingers.
+        sensor._state_machine.cancel_wait()
+        sensor._stop_periodic_update()
     for task in wait_tasks:
         with contextlib.suppress(asyncio.CancelledError):
             await task
