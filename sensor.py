@@ -112,12 +112,14 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
 
     @_state.setter
     def _state(self, value: str) -> None:
-        """Set state machine state - uses proper transition API."""
+        """Set state machine state.
+        
+        Note: Directly sets internal state for backwards compatibility with tests.
+        In production, state transitions should go through transition_to() for
+        validation. This setter bypasses transition validation.
+        """
         from .const import ControllerState
-        state = ControllerState(value)
-        # Use async run to call transition_to from sync context if needed
-        # For tests, directly set the state
-        self._state_machine._state = state
+        self._state_machine._state = ControllerState(value)
 
     @property
     def _demand_on(self) -> bool:
