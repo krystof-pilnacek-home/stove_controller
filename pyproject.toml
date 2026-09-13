@@ -16,6 +16,8 @@ dev = [
     "homeassistant",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "pytest-homeassistant-custom-component>=0.13",
+    "pytest-socket>=0.6",
 ]
 
 [tool.setuptools]
