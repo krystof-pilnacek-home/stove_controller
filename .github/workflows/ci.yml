@@ -8,16 +8,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Cache uv dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-
       - run: uv sync --all-extras --frozen
       - run: uv run ruff check .
       - run: uv run mypy .
@@ -27,15 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Cache uv dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/uv
-          key: uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-
       - run: uv sync --all-extras --frozen
-      - run: uv run pytest tests/ -v --tb=short
+      - name: e2e tests coverage
+        run: uv run pytest tests/test_e2e_final.py -v --tb=short --cov custom_components.stove_controller
+      - run: uv run pytest tests/ -v --tb=short 
