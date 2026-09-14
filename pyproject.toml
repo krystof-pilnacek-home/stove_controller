@@ -31,4 +31,15 @@ stove_controller = ["*.json"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --cov=stove_controller --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html"
+
+[tool.coverage.run]
+source = ["stove_controller"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.coverage.xml]
+output = "coverage.xml"
