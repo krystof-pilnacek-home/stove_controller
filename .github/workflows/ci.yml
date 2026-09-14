@@ -38,4 +38,6 @@ jobs:
           restore-keys: |
             uv-
       - run: uv sync --all-extras --frozen
-      - run: uv run pytest tests/ -v --tb=short
+      - name: e2e tests coverage
+        run: uv run pytest tests/test_e2e_final.py -v --tb=short --cov ./
+      - run: uv run pytest tests/ -v --tb=short 
