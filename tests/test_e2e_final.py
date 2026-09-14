@@ -14,14 +14,15 @@ DESIGN NOTE: Testing PENDING (transient) states
 -----------------------------------------------
 PENDING_ON and PENDING_OFF are transient states that exist while the
 controller waits for min_off / min_on duration to elapse before switching
-the relay.  The wait is implemented via asyncio.sleep(), which uses the
-event loop's monotonic clock (loop.time()), NOT the wall-clock that the
-freezer fixture controls.
+the relay.  The wait is implemented via asyncio.sleep(), which schedules
+its timer against the event loop clock (loop.time()).
 
-To make these states observable in tests without waiting real time, we
-patch loop.time() with a controllable offset (_freezer_aware_loop_time
-fixture).  The advance() helper advances both the freezer (wall-clock)
-and this offset (loop clock).  This lets tests:
+The freezer fixture (time-machine) advances both the wall clock and
+loop.time() in this Home Assistant / Python version, so advancing the
+freezer by a delta also makes any asyncio.sleep timer scheduled against
+loop.time() become due and fire.  The advance() helper moves the freezer
+and pumps the event loop so the timer callback (and the events it
+triggers, e.g. state_changed) are fully processed.  This lets tests:
 
 1. Assert PENDING_ON / PENDING_OFF immediately after a demand change.
 2. Advance time by the remaining wait to observe the transition to
@@ -29,9 +30,7 @@ and this offset (loop clock).  This lets tests:
 3. Assert time_remaining_sec and in_grace_period attributes during the
    wait.
 
-This approach does NOT patch asyncio.sleep -- the real sleep is used, but
-its deadline is based on the patched loop.time(), so it fires when
-advance() is called rather than after real wall-clock time.
+No manual patching of loop.time() or asyncio.sleep is applied.
 """
 
 import asyncio
@@ -43,7 +42,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import Event, State
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -74,18 +72,6 @@ _LOGGER = logging.getLogger(__name__)
 
 TEST_MIN_ON_DURATION_MIN = 30
 TEST_MIN_OFF_DURATION_MIN = 25
-
-
-# =============================================================================
-# Module-level state for loop-time offset
-# =============================================================================
-#
-# asyncio.sleep schedules timers against loop.time() (monotonic clock), which
-# the freezer fixture does NOT control.  We add a controllable offset so that
-# advancing time in tests also advances the event-loop clock, causing sleep
-# timers to fire without real wall-clock delay.
-
-_loop_time_state: dict[str, float] = {"offset": 0.0}
 
 
 # =============================================================================
@@ -145,12 +131,13 @@ def hass_config_dir(hass_tmp_config_dir):
 async def test_relay(hass):
     """Set up a test relay with mocked service handlers that fire events."""
     from homeassistant.components.switch import SwitchEntity
-    from homeassistant.const import STATE_ON
     from homeassistant.helpers.entity_component import EntityComponent
 
     relay_entity_id = "switch.test_relay"
 
-    # Create a simple switch entity that HA can find
+    # Create a simple switch entity that HA can find.  Writing state via
+    # async_write_ha_state() emits the real state_changed event that the
+    # controller listens for, so no manual event firing is needed.
     class TestRelaySwitch(SwitchEntity):
         """A simple test relay switch."""
         _attr_should_poll = False
@@ -166,42 +153,12 @@ async def test_relay(hass):
             return self._is_on
 
         async def async_turn_on(self, **kwargs):
-            old_state = self._is_on
             self._is_on = True
             self.async_write_ha_state()
-            # Fire state changed event
-            old_state_obj = State(relay_entity_id, STATE_OFF if old_state else STATE_ON)
-            new_state_obj = State(relay_entity_id, STATE_ON)
-            hass.bus.async_fire(
-                "state_changed",
-                Event(
-                    event_type="state_changed",
-                    data={
-                        "entity_id": relay_entity_id,
-                        "old_state": old_state_obj,
-                        "new_state": new_state_obj,
-                    },
-                ),
-            )
 
         async def async_turn_off(self, **kwargs):
-            old_state = self._is_on
             self._is_on = False
             self.async_write_ha_state()
-            # Fire state changed event
-            old_state_obj = State(relay_entity_id, STATE_ON if old_state else STATE_OFF)
-            new_state_obj = State(relay_entity_id, STATE_OFF)
-            hass.bus.async_fire(
-                "state_changed",
-                Event(
-                    event_type="state_changed",
-                    data={
-                        "entity_id": relay_entity_id,
-                        "old_state": old_state_obj,
-                        "new_state": new_state_obj,
-                    },
-                ),
-            )
 
     # Register the entity with the switch component
     component = EntityComponent(_LOGGER, "switch", hass)
@@ -266,56 +223,23 @@ async def stove(hass, freezer, enable_custom_integrations, test_relay):
 
 
 # =============================================================================
-# Freezer-aware event-loop time patching
-# =============================================================================
-#
-# The freezer fixture (time-machine) controls wall-clock time (time.time,
-# datetime.now) but NOT the event loop's monotonic clock (loop.time).  Since
-# asyncio.sleep schedules against loop.time(), we patch loop.time() to add
-# a controllable offset.  The advance() helper advances this offset alongside
-# the freezer, so sleep timers fire when advance() is called -- not after real
-# wall-clock time.
-#
-# This allows PENDING_ON / PENDING_OFF transient states to be observed:
-# - After a demand change that triggers a wait, the state enters PENDING and
-#   the sleep timer is scheduled at loop.time() + remaining.
-# - The test asserts the PENDING state.
-# - advance(remaining) advances the offset so the timer becomes due and fires.
-# - The test asserts the terminal state (HEATING / IDLE).
-
-
-@pytest.fixture(autouse=True)
-def _freezer_aware_loop_time(hass, freezer, monkeypatch):
-    """Patch loop.time() with a controllable offset synced to advance()."""
-    loop = hass.loop
-    original_time = loop.time
-
-    # Reset offset for each test
-    _loop_time_state["offset"] = 0.0
-
-    def _patched_time() -> float:
-        return original_time() + _loop_time_state["offset"]
-
-    monkeypatch.setattr(loop, "time", _patched_time, raising=False)
-
-
-# =============================================================================
 # Time control helpers
 # =============================================================================
 
 
 async def advance(hass: HomeAssistant, freezer: Any, **kwargs: Any) -> None:
-    """Advance freezer time and event-loop time, then pump both HA trackers
-    and asyncio sleep timers.
+    """Advance the freezer (wall clock + loop.time()) and pump the event loop.
 
-    The loop-time offset is advanced by the same delta as the freezer, so any
-    asyncio.sleep timer that was scheduled with the patched loop.time() becomes
-    due and fires.  Multiple event-loop pumps ensure the timer callback and any
-    events it triggers (e.g. state_changed) are fully processed.
+    The freezer fixture (time-machine) advances both the wall clock and the
+    event loop clock (loop.time()) in this Home Assistant version, so any
+    asyncio.sleep timer that the controller scheduled against loop.time()
+    becomes due when the freezer moves and fires once the loop is pumped.
+    Multiple event-loop pumps ensure the timer callback and the events it
+    triggers (e.g. state_changed -> _on_relay_change -> _apply_demand_logic)
+    are fully processed.
     """
     delta = timedelta(**kwargs)
     freezer.tick(delta)
-    _loop_time_state["offset"] += delta.total_seconds()
     async_fire_time_changed(hass)
     # Pump 1: move due sleep timers into the ready queue, then process them.
     await asyncio.sleep(0)

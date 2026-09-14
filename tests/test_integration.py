@@ -4,6 +4,7 @@ Tests the interaction between switch and sensor components.
 """
 
 import asyncio
+import contextlib
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,8 +23,16 @@ from stove_controller.switch import StoveDemandSwitch
 
 
 @pytest.fixture
-def mock_hass_with_bus():
-    """Create a mock Home Assistant instance with event bus."""
+async def mock_hass_with_bus():
+    """Create a mock Home Assistant instance with event bus.
+
+    Sensors are created inline by the tests and assigned this mock as
+    ``hass``.  ``_start_wait`` schedules the wait via
+    ``asyncio.create_task`` (not ``hass.async_create_task``), so the fixture
+    cannot capture the tasks by wrapping a hass method.  Instead, on teardown
+    it cancels any still-pending ``_wait_and_execute`` tasks so the HACC
+    ``verify_cleanup`` plugin does not flag them as lingering.
+    """
     hass = MagicMock()
     hass.data = {}
     hass.states = MagicMock()
@@ -43,7 +52,25 @@ def mock_hass_with_bus():
     hass.states.get = MagicMock(return_value=MagicMock(state=STATE_OFF))
     hass.states.is_state = MagicMock(return_value=False)
 
-    return hass
+    yield hass
+
+    # Cancel and await any lingering _wait_and_execute tasks started by
+    # sensors that used this mock hass.  Sensors are created inline by the
+    # tests, so the tasks are discovered via asyncio.all_tasks() rather than a
+    # registry.  The tasks must be awaited to completion (not just cancelled)
+    # so the HACC verify_cleanup plugin does not flag them as lingering.
+    # Match by coroutine qualified name (a method, e.g.
+    # ``StoveControllerSensor._wait_and_execute``).
+    wait_tasks = [
+        task
+        for task in asyncio.all_tasks()
+        if "_wait_and_execute" in task.get_coro().__qualname__
+    ]
+    for task in wait_tasks:
+        task.cancel()
+    for task in wait_tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 class TestSwitchSensorIntegration:

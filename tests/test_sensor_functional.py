@@ -197,10 +197,11 @@ class TestScenario2WaitTriggered:
         assert sensor._state == STATE_PENDING_ON
         assert sensor._wait_task is not None
 
-        # Simulate wait completion
-        sensor._wait_task = None
-        sensor._wait_until = None
-        sensor._stop_periodic_update()
+        # Simulate wait completion: cancel the real wait task (instead of
+        # orphaning it by nilling the reference) so no _wait_and_execute
+        # task lingers after the test.
+        sensor._cancel_wait()
+        assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
         with patch(
@@ -226,10 +227,11 @@ class TestScenario2WaitTriggered:
         assert sensor._state == STATE_PENDING_OFF
         assert sensor._wait_task is not None
 
-        # Simulate wait completion
-        sensor._wait_task = None
-        sensor._wait_until = None
-        sensor._stop_periodic_update()
+        # Simulate wait completion: cancel the real wait task (instead of
+        # orphaning it by nilling the reference) so no _wait_and_execute
+        # task lingers after the test.
+        sensor._cancel_wait()
+        assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
         with patch(

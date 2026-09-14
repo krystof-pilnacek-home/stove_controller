@@ -1,5 +1,7 @@
 """Fixtures for Stove Controller tests."""
 
+import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -70,13 +72,18 @@ def make_sensor():
 
 
 @pytest.fixture
-def setup_sensor_hass(make_sensor, monkeypatch):
+async def setup_sensor_hass(make_sensor, monkeypatch):
     """Factory fixture to set up a sensor with a mock hass.
 
     Returns a callable that accepts the same kwargs as ``make_sensor``
     and returns a ``(sensor, hass)`` tuple.  Uses ``monkeypatch.setattr``
     so that mocking base-class methods passes mypy.
+
+    On teardown, cancels any pending wait task on every sensor created
+    via the factory so the HACC ``verify_cleanup`` plugin does not flag
+    lingering ``_wait_and_execute`` tasks.
     """
+    created: list[StoveControllerSensor] = []
 
     def _setup(
         relay_entity: str = "switch.test_relay",
@@ -106,6 +113,21 @@ def setup_sensor_hass(make_sensor, monkeypatch):
             sensor, "async_get_last_state", AsyncMock(return_value=None)
         )
 
+        created.append(sensor)
         return sensor, hass
 
-    return _setup
+    yield _setup
+
+    # Cancel and await any pending wait task so it does not linger after the
+    # test.  The tasks must be awaited to completion (not just cancelled) so
+    # the HACC verify_cleanup plugin does not flag them as lingering.
+    wait_tasks = [
+        sensor._wait_task
+        for sensor in created
+        if sensor._wait_task is not None and not sensor._wait_task.done()
+    ]
+    for sensor in created:
+        sensor._cancel_wait()
+    for task in wait_tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
