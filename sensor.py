@@ -113,7 +113,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
     @_state.setter
     def _state(self, value: str) -> None:
         """Set state machine state.
-        
+
         Note: Directly sets internal state for backwards compatibility with tests.
         In production, state transitions should go through transition_to() for
         validation. This setter bypasses transition validation.
@@ -331,24 +331,24 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Handle relay state change."""
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
-        
+
         # Skip if no new state
         if new_state is None:
             return
-        
+
         # Handle relay appearance event (old_state=None, e.g., HA restart)
         # Preserve timestamps but re-evaluate demand
         if old_state is None:
             await self._state_machine.evaluate()
             return
-        
+
         # Skip if state hasn't actually changed
         if old_state.state == new_state.state:
             return
-        
+
         # Extract state string
         new_state_str = new_state.state if hasattr(new_state, 'state') else new_state
-        
+
         await self._state_machine.update_relay_state(new_state_str)
 
     async def async_check_health(self) -> None:

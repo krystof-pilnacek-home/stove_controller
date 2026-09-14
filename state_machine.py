@@ -421,7 +421,8 @@ class StoveStateMachine:
                 if self._state is not STATE_HEATING:
                     await self.transition_to(STATE_HEATING)
             else:
-                # Relay did not change due to failure - transition to stable state
+                # Relay did not turn on - stay in a stable state matching the
+                # (still off) relay rather than asserting HEATING.
                 if self._state is not STATE_IDLE:
                     await self.transition_to(STATE_IDLE)
                 _LOGGER.warning("Turn on failed; transitioned to IDLE")
@@ -444,7 +445,8 @@ class StoveStateMachine:
                 if self._state is not STATE_IDLE:
                     await self.transition_to(STATE_IDLE)
             else:
-                # Relay did not change due to failure - transition to stable state
+                # Relay did not turn off - it is still on, so HEATING is the
+                # honest representation of the current relay state.
                 if self._state is not STATE_HEATING:
                     await self.transition_to(STATE_HEATING)
                 _LOGGER.warning("Turn off failed; transitioned to HEATING")
@@ -454,7 +456,7 @@ class StoveStateMachine:
 
     async def _turn_on_relay(self) -> bool:
         """Send command to turn on relay.
-        
+
         Returns:
             True if successful, False if failed
         """
@@ -476,7 +478,7 @@ class StoveStateMachine:
 
     async def _turn_off_relay(self) -> bool:
         """Send command to turn off relay.
-        
+
         Returns:
             True if successful, False if failed
         """
@@ -518,9 +520,15 @@ class StoveStateMachine:
                 await self.transition_to(STATE_PENDING_ON)
                 self._start_wait(remaining, self._complete_turn_on)
             else:
-                await self._turn_on_relay()
-                if self._state is not STATE_HEATING:
-                    await self.transition_to(STATE_HEATING)
+                if await self._turn_on_relay():
+                    if self._state is not STATE_HEATING:
+                        await self.transition_to(STATE_HEATING)
+                else:
+                    # Relay did not turn on - stay in a stable state matching
+                    # the (still off) relay rather than asserting HEATING.
+                    if self._state is not STATE_IDLE:
+                        await self.transition_to(STATE_IDLE)
+                    _LOGGER.warning("Turn on failed; transitioned to IDLE")
 
         elif not self._demand_on and relay_on:
             remaining = self._compute_remaining(self._last_on, self._min_on_duration)
@@ -528,9 +536,15 @@ class StoveStateMachine:
                 await self.transition_to(STATE_PENDING_OFF)
                 self._start_wait(remaining, self._complete_turn_off)
             else:
-                await self._turn_off_relay()
-                if self._state is not STATE_IDLE:
-                    await self.transition_to(STATE_IDLE)
+                if await self._turn_off_relay():
+                    if self._state is not STATE_IDLE:
+                        await self.transition_to(STATE_IDLE)
+                else:
+                    # Relay did not turn off - it is still on, so HEATING is the
+                    # honest representation of the current relay state.
+                    if self._state is not STATE_HEATING:
+                        await self.transition_to(STATE_HEATING)
+                    _LOGGER.warning("Turn off failed; transitioned to HEATING")
 
         elif self._demand_on and relay_on:
             if self._state is not STATE_HEATING:

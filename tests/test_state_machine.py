@@ -522,10 +522,10 @@ class TestUnknownRelayState:
         sm = make_state_machine()
         sm._state = STATE_HEATING
         sm._demand_on = True
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             await sm.update_relay_state("unknown")
-        
+
         mock_logger.warning.assert_called_once()
         assert sm.state == STATE_IDLE
 
@@ -535,10 +535,10 @@ class TestUnknownRelayState:
         sm = make_state_machine()
         sm._state = STATE_HEATING
         sm._demand_on = True
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             await sm.update_relay_state("unavailable")
-        
+
         mock_logger.warning.assert_called_once()
         assert sm.state == STATE_IDLE
 
@@ -549,9 +549,9 @@ class TestUnknownRelayState:
         sm._state = STATE_PENDING_ON
         sm._demand_on = True
         sm._wait_until = _now() + timedelta(seconds=100)
-        
+
         await sm.update_relay_state("unknown")
-        
+
         assert sm.wait_until is None
         assert sm.state == STATE_IDLE
 
@@ -563,12 +563,12 @@ class TestUnknownRelayState:
         sm._demand_on = True
         sm._last_on = _now() - timedelta(minutes=5)
         sm._last_off = _now() - timedelta(minutes=20)
-        
+
         original_last_on = sm._last_on
         original_last_off = sm._last_off
-        
+
         await sm.update_relay_state("unknown")
-        
+
         assert sm._last_on == original_last_on
         assert sm._last_off == original_last_off
         assert sm.state == STATE_IDLE
@@ -583,28 +583,32 @@ class TestOldStateNoneHandling:
     """Tests for handling old_state=None (HA restart scenario)."""
 
     @pytest.mark.asyncio
-    async def test_old_state_none_re_evaluates_demand(self, setup_state_machine_hass):
+    async def test_old_state_none_re_evaluates_demand(
+        self, setup_state_machine_hass
+    ):
         """old_state=None triggers demand re-evaluation via evaluate()."""
         sm, hass = setup_state_machine_hass()
         sm._state = STATE_HEATING
         sm._demand_on = True
         sm._last_on = _now() - timedelta(minutes=5)
         sm._last_off = _now() - timedelta(minutes=20)
-        
+
         # Set relay to off
         hass.states.is_state.return_value = False
-        
+
         # When old_state is None, sensor._on_relay_change calls evaluate() instead
         # So we test evaluate() directly
         await sm.evaluate()
-        
+
         # Should have re-evaluated and transitioned based on demand and relay state
-        # Since demand_on=True and relay_on=False, it should start waiting or turn on
-        # But since we're in a test without a real event loop, we just check it didn't crash
+        # Since demand_on=True and relay_on=False, it should start waiting
+        # or turn on. Without a real event loop, just check it didn't crash.
 
     @pytest.mark.asyncio
-    async def test_old_state_none_preserves_timestamps(self, setup_state_machine_hass):
-        """old_state=None preserves timestamps while re-evaluating when demand matches state."""
+    async def test_old_state_none_preserves_timestamps(
+        self, setup_state_machine_hass
+    ):
+        """old_state=None preserves timestamps when demand matches state."""
         sm, hass = setup_state_machine_hass()
         # Set state to IDLE with demand off and relay off - no action needed
         sm._state = STATE_IDLE
@@ -613,13 +617,13 @@ class TestOldStateNoneHandling:
         original_last_off = _now() - timedelta(minutes=20)
         sm._last_on = original_last_on
         sm._last_off = original_last_off
-        
+
         hass.states.is_state.return_value = False
-        
+
         # When old_state is None, sensor._on_relay_change calls evaluate() instead
         # So we test evaluate() directly
         await sm.evaluate()
-        
+
         # Timestamps should be preserved when no action is needed
         assert sm._last_on == original_last_on
         assert sm._last_off == original_last_off
@@ -641,10 +645,10 @@ class TestServiceFailureHandling:
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             result = await sm._turn_on_relay()
-        
+
         assert result is False
         mock_logger.error.assert_called_once()
 
@@ -655,15 +659,17 @@ class TestServiceFailureHandling:
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             result = await sm._turn_off_relay()
-        
+
         assert result is False
         mock_logger.error.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_complete_turn_on_failure_transitions_to_idle(self, setup_state_machine_hass):
+    async def test_complete_turn_on_failure_transitions_to_idle(
+        self, setup_state_machine_hass
+    ):
         """_complete_turn_on on failure transitions PENDING_ON to IDLE."""
         sm, hass = setup_state_machine_hass()
         sm._state = STATE_PENDING_ON
@@ -671,15 +677,17 @@ class TestServiceFailureHandling:
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             await sm._complete_turn_on()
-        
+
         mock_logger.warning.assert_called_once()
         assert sm.state == STATE_IDLE
 
     @pytest.mark.asyncio
-    async def test_complete_turn_off_failure_transitions_to_heating(self, setup_state_machine_hass):
+    async def test_complete_turn_off_failure_transitions_to_heating(
+        self, setup_state_machine_hass
+    ):
         """_complete_turn_off on failure transitions PENDING_OFF to HEATING."""
         sm, hass = setup_state_machine_hass()
         sm._state = STATE_PENDING_OFF
@@ -687,9 +695,78 @@ class TestServiceFailureHandling:
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
-        
+
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
             await sm._complete_turn_off()
-        
+
         mock_logger.warning.assert_called_once()
         assert sm.state == STATE_HEATING
+
+    @pytest.mark.asyncio
+    async def test_apply_demand_logic_turn_on_failure_goes_idle(
+        self, setup_state_machine_hass
+    ):
+        """Immediate (no-wait) turn-on failure transitions to IDLE, not HEATING."""
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_IDLE
+        sm._demand_on = True
+        # Relay off, no min_off wait remaining -> immediate turn-on path
+        hass.states.is_state.return_value = False
+        sm._last_off = _now() - timedelta(minutes=60)
+        hass.services.async_call = AsyncMock(
+            side_effect=RuntimeError("Service not available")
+        )
+
+        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
+            await sm._apply_demand_logic(relay_on=False)
+
+        mock_logger.warning.assert_called_once()
+        assert sm.state == STATE_IDLE
+
+    @pytest.mark.asyncio
+    async def test_apply_demand_logic_turn_off_failure_goes_heating(
+        self, setup_state_machine_hass
+    ):
+        """Immediate (no-wait) turn-off failure transitions to HEATING, not IDLE."""
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_HEATING
+        sm._demand_on = False
+        # Relay on, no min_on wait remaining -> immediate turn-off path
+        hass.states.is_state.return_value = True
+        sm._last_on = _now() - timedelta(minutes=60)
+        hass.services.async_call = AsyncMock(
+            side_effect=RuntimeError("Service not available")
+        )
+
+        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
+            await sm._apply_demand_logic(relay_on=True)
+
+        mock_logger.warning.assert_called_once()
+        assert sm.state == STATE_HEATING
+
+    @pytest.mark.asyncio
+    async def test_start_wait_republishes_state(self, setup_state_machine_hass):
+        """_start_wait schedules a state-change republish so time_remaining_sec is
+        published with the wait duration instead of the stale pre-wait value.
+        """
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_PENDING_ON
+        seen: list = []
+
+        async def callback(state):
+            seen.append(state)
+
+        sm.on_state_change = callback
+
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            sm._start_wait(120, AsyncMock())
+
+        # The mock hass captures the scheduled coroutines without running them;
+        # drive the republish coroutine (the non-wait-task one) to completion.
+        scheduled = [c.args[0] for c in hass.async_create_task.call_args_list if c.args]
+        republishes = [
+            c for c in scheduled if getattr(c, "__qualname__", "").endswith(".callback")
+        ]
+        assert republishes, "state-change republish was not scheduled on wait start"
+        await republishes[0]
+        assert seen == [STATE_PENDING_ON]
