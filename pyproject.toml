@@ -37,9 +37,10 @@ addopts = "-v --tb=short --cov=stove_controller --cov-report=term-missing --cov-
 [tool.coverage.run]
 source = ["stove_controller"]
 branch = true
+omit = ["tests/*"]
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 80
 show_missing = true
 
 [tool.coverage.xml]

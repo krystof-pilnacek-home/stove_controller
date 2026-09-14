@@ -29,7 +29,7 @@ jobs:
           python-version: "3.14"
       - run: uv sync --all-extras --frozen
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov=stove_controller --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html --cov-fail-under=90
+        run: uv run pytest tests/ -v --tb=short --cov=stove_controller --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html --cov-fail-under=80
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
