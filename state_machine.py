@@ -265,6 +265,28 @@ class StoveStateMachine:
         # Pass the new relay state to avoid fetching it again
         await self._apply_demand_logic(new_state == "on")
 
+    async def update_relay_appearance(self, new_state: str) -> None:
+        """Handle a relay (re)appearance event (old_state is None, e.g. HA restart).
+
+        Unlike ``update_relay_state``, this preserves any timestamps restored
+        from the previous run so on/off history is not lost across a restart.
+        The timestamp for the relay's reported state is marked only when it was
+        not already known (``None``), so a restart never discards a genuine
+        prior on/off time.  Demand is then re-applied from those timestamps.
+        """
+        match new_state:
+            case "on":
+                if self._last_on is None:
+                    self._last_on = dt_util.now()
+            case "off":
+                if self._last_off is None:
+                    self._last_off = dt_util.now()
+            case _:
+                await self.update_relay_state(new_state)
+                return
+
+        await self._apply_demand_logic(new_state == "on")
+
     async def transition_to(self, target: ControllerState) -> bool:
         """Transition to a new state if valid."""
         if not self.is_valid_transition(target):
