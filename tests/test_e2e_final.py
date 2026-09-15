@@ -394,17 +394,16 @@ class TestCoreTransitions:
 
         # Verify we're in IDLE with relay OFF
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
-
+        assert not relay_is_on(hass, h)
         # Act: demand ON
         await demand_on(hass, h)
 
         # Assert: immediate transition to HEATING, relay turns ON
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is True
-        assert attrs.get("in_grace_period") is False
+        assert attrs.get("demand_on")
+        assert not attrs.get("in_grace_period")
         assert attrs.get("time_remaining_sec") == 0
 
     # T2: IDLE -> PENDING_ON -> HEATING (demand ON within min_off)
@@ -423,10 +422,10 @@ class TestCoreTransitions:
 
         # Assert: enters PENDING_ON (not instant HEATING)
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is True
-        assert attrs.get("in_grace_period") is True
+        assert attrs.get("demand_on")
+        assert attrs.get("in_grace_period")
         # remaining = 25 - 5 = 20 min = 1200 sec
         assert attrs.get("time_remaining_sec") == 1200
 
@@ -435,9 +434,9 @@ class TestCoreTransitions:
 
         # Assert: now HEATING with relay ON
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("in_grace_period") is False
+        assert not attrs.get("in_grace_period")
         assert attrs.get("time_remaining_sec") == 0
 
     # T3: HEATING -> IDLE (demand OFF after min_on elapsed)
@@ -453,17 +452,16 @@ class TestCoreTransitions:
 
         # Verify we're in HEATING with relay ON
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
-
+        assert relay_is_on(hass, h)
         # Act: demand OFF
         await demand_off(hass, h)
 
         # Assert: immediate transition to IDLE, relay turns OFF
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is False
-        assert attrs.get("in_grace_period") is False
+        assert not attrs.get("demand_on")
+        assert not attrs.get("in_grace_period")
         assert attrs.get("time_remaining_sec") == 0
 
     # T4: HEATING -> PENDING_OFF -> IDLE (demand OFF within min_on)
@@ -482,10 +480,10 @@ class TestCoreTransitions:
 
         # Assert: enters PENDING_OFF (not instant IDLE)
         assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is False
-        assert attrs.get("in_grace_period") is True
+        assert not attrs.get("demand_on")
+        assert attrs.get("in_grace_period")
         # remaining = 30 - 5 = 25 min = 1500 sec
         assert attrs.get("time_remaining_sec") == 1500
 
@@ -494,9 +492,9 @@ class TestCoreTransitions:
 
         # Assert: now IDLE with relay OFF
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("in_grace_period") is False
+        assert not attrs.get("in_grace_period")
         assert attrs.get("time_remaining_sec") == 0
 
     # T5: Demand OFF during PENDING_ON -> IDLE (wait cancelled)
@@ -513,18 +511,16 @@ class TestCoreTransitions:
         # Demand ON -> enters PENDING_ON
         await demand_on(hass, h)
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
-
+        assert not relay_is_on(hass, h)
         # Act: demand OFF while still in PENDING_ON
         await demand_off(hass, h)
 
         # Assert: wait cancelled, goes to IDLE (relay never turned on)
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is False
-        assert attrs.get("in_grace_period") is False
-
+        assert not attrs.get("demand_on")
+        assert not attrs.get("in_grace_period")
     # T6: Demand ON during PENDING_OFF -> HEATING (wait cancelled)
     @pytest.mark.asyncio
     async def test_demand_on_during_pending_off_goes_heating(
@@ -539,18 +535,16 @@ class TestCoreTransitions:
         # Demand OFF -> enters PENDING_OFF (relay still ON)
         await demand_off(hass, h)
         assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
-        assert relay_is_on(hass, h) is True
-
+        assert relay_is_on(hass, h)
         # Act: demand ON while still in PENDING_OFF
         await demand_on(hass, h)
 
         # Assert: wait cancelled, goes to HEATING (relay stays on)
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("demand_on") is True
-        assert attrs.get("in_grace_period") is False
-
+        assert attrs.get("demand_on")
+        assert not attrs.get("in_grace_period")
     # T7: External relay ON while IDLE -> PENDING_OFF
     @pytest.mark.asyncio
     async def test_external_relay_on_while_idle_pending_off(
@@ -563,8 +557,7 @@ class TestCoreTransitions:
         # Arrange: IDLE with relay OFF
         await reach_idle(hass, freezer, h, last_off_age_min=40, last_on_age_min=40)
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
-
+        assert not relay_is_on(hass, h)
         # Act: External relay ON
         await relay_on(hass, h)
 
@@ -572,9 +565,9 @@ class TestCoreTransitions:
         # (it wants to turn the relay off, but must wait for min_on_duration)
         await hass.async_block_till_done()
         assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("in_grace_period") is True
+        assert attrs.get("in_grace_period")
         # Full min_on duration since last_on was just set by the relay change
         assert attrs.get("time_remaining_sec") == TEST_MIN_ON_DURATION_MIN * 60
 
@@ -594,9 +587,9 @@ class TestCoreTransitions:
 
         # Assert: enters PENDING_ON (no last_off -> full min_off wait)
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("in_grace_period") is True
+        assert attrs.get("in_grace_period")
         assert attrs.get("time_remaining_sec") == TEST_MIN_OFF_DURATION_MIN * 60
 
         # Advance past min_off
@@ -604,8 +597,7 @@ class TestCoreTransitions:
 
         # Assert: now HEATING
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
-
+        assert relay_is_on(hass, h)
     # T9: Complete cycle with PENDING states
     @pytest.mark.asyncio
     async def test_complete_cycle_with_pending_states(
@@ -625,20 +617,17 @@ class TestCoreTransitions:
         # Step 2: advance 20 min -> HEATING
         await advance(hass, freezer, minutes=20)
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
-
+        assert relay_is_on(hass, h)
         # Step 3: demand OFF -> PENDING_OFF (full 30 min, last_on just set)
         await demand_off(hass, h)
         assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         assert get_attrs(hass, h.controller_id).get("time_remaining_sec") == 1800
 
         # Step 4: advance 30 min -> IDLE
         await advance(hass, freezer, minutes=30)
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
-
-
+        assert not relay_is_on(hass, h)
 # =============================================================================
 # Test Group 2: Restart/State-Carryover (T10-T13)
 # =============================================================================
@@ -667,11 +656,9 @@ class TestRestartStateCarryover:
         await hass.config_entries.async_setup(h.entry.entry_id)
         await hass.async_block_till_done()
 
-        # Assert: state is preserved as PENDING_ON
-        # (last_state is restored and _apply_demand_logic recomputes the same
-        # remaining > 0, so the controller re-enters PENDING_ON)
-        state = get_state(hass, h.controller_id)
-        assert state == STATE_PENDING_ON
+        # Assert: state is preserved as PENDING_ON (the wait is restored and
+        # re-evaluation re-arms the same PENDING_ON wait).
+        assert get_state(hass, h.controller_id) == STATE_PENDING_ON
 
     # T11: Restart during PENDING_OFF -> state preserved
     @pytest.mark.asyncio
@@ -693,9 +680,9 @@ class TestRestartStateCarryover:
         await hass.config_entries.async_setup(h.entry.entry_id)
         await hass.async_block_till_done()
 
-        # Assert: state is preserved as PENDING_OFF
-        state = get_state(hass, h.controller_id)
-        assert state == STATE_PENDING_OFF
+        # Assert: state is preserved as PENDING_OFF (the wait is restored and
+        # re-evaluation re-arms the same PENDING_OFF wait).
+        assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
 
     # T12: Restart in HEATING -> stays HEATING
     @pytest.mark.asyncio
@@ -771,8 +758,7 @@ class TestRelayFaultRecovery:
 
         # Assert: PENDING_ON, relay still OFF
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
-
+        assert not relay_is_on(hass, h)
     # T15: Relay turn_off fails -> stays in PENDING_OFF
     @pytest.mark.asyncio
     async def test_relay_turn_off_fails_stays_pending_off(
@@ -794,9 +780,7 @@ class TestRelayFaultRecovery:
 
         # Assert: PENDING_OFF, relay still ON
         assert get_state(hass, h.controller_id) == STATE_PENDING_OFF
-        assert relay_is_on(hass, h) is True
-
-
+        assert relay_is_on(hass, h)
 # =============================================================================
 # Test Group 4: Edge Cases (T16-T18)
 # =============================================================================
@@ -822,8 +806,7 @@ class TestEdgeCases:
 
         # Assert: Still HEATING
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
-
+        assert relay_is_on(hass, h)
     # T17: Demand OFF when already IDLE -> no state change
     @pytest.mark.asyncio
     async def test_demand_off_when_already_idle_no_change(
@@ -841,8 +824,7 @@ class TestEdgeCases:
 
         # Assert: Still IDLE
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
-
+        assert not relay_is_on(hass, h)
     # T18: Rapid ON-OFF-ON within min_off -> final state is PENDING_ON
     @pytest.mark.asyncio
     async def test_rapid_on_off_on_within_min_off(
@@ -865,11 +847,9 @@ class TestEdgeCases:
 
         # Assert: back in PENDING_ON (wait restarted)
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         attrs = get_attrs(hass, h.controller_id)
-        assert attrs.get("in_grace_period") is True
-
-
+        assert attrs.get("in_grace_period")
 # =============================================================================
 # Test Group 5: PENDING State Attributes and Countdown (T19-T21)
 # =============================================================================
@@ -909,7 +889,7 @@ class TestPendingStateDetails:
         # Advance final 5 minutes -> HEATING
         await advance(hass, freezer, minutes=5)
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
         assert get_attrs(hass, h.controller_id).get("time_remaining_sec") == 0
 
     # T20: PENDING_OFF time_remaining decreases as time advances
@@ -937,7 +917,7 @@ class TestPendingStateDetails:
         # Advance final 15 minutes -> IDLE
         await advance(hass, freezer, minutes=15)
         assert get_state(hass, h.controller_id) == STATE_IDLE
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         assert get_attrs(hass, h.controller_id).get("time_remaining_sec") == 0
 
     # T21: Partial advance during PENDING_ON does not trigger HEATING
@@ -958,11 +938,11 @@ class TestPendingStateDetails:
 
         # Assert: still PENDING_ON, relay still OFF
         assert get_state(hass, h.controller_id) == STATE_PENDING_ON
-        assert relay_is_on(hass, h) is False
+        assert not relay_is_on(hass, h)
         remaining = get_attrs(hass, h.controller_id).get("time_remaining_sec")
         assert remaining == 60  # 1 min left
 
         # Advance the final minute
         await advance(hass, freezer, minutes=1)
         assert get_state(hass, h.controller_id) == STATE_HEATING
-        assert relay_is_on(hass, h) is True
+        assert relay_is_on(hass, h)
