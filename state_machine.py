@@ -201,7 +201,7 @@ class StoveStateMachine:
         safe default.
         """
         if self.hass is None:
-            return False  # Safe default when HA is not available
+            return False
         return self.hass.states.is_state(self._relay_entity, "on")
 
     async def set_demand(self, demand_on: bool, relay_on: bool | None = None) -> None:
@@ -262,7 +262,6 @@ class StoveStateMachine:
                 await self.transition_to(STATE_UNAVAILABLE)
                 return
 
-        # Pass the new relay state to avoid fetching it again
         await self._apply_demand_logic(new_state == "on")
 
     async def transition_to(self, target: ControllerState) -> bool:
@@ -300,7 +299,6 @@ class StoveStateMachine:
             STATE_UNAVAILABLE,
         }
 
-        # Try to convert string to ControllerState
         if isinstance(state, str):
             try:
                 state = ControllerState(state)
@@ -308,7 +306,6 @@ class StoveStateMachine:
                 _LOGGER.warning("Invalid restored state: %s, resetting to IDLE", state)
                 state = STATE_IDLE
 
-        # Validate and potentially correct state
         if state not in valid_states:
             _LOGGER.warning("Invalid restored state: %s, resetting to IDLE", state)
             state = STATE_IDLE
@@ -328,14 +325,12 @@ class StoveStateMachine:
                 demand_on = False
                 _LOGGER.warning("Corrected demand_on to match PENDING_OFF state")
 
-        # Set all fields atomically
         self._state = state
         self._demand_on = demand_on
         self._last_on = last_on
         self._last_off = last_off
         self._wait_until = wait_until
 
-        # Restore active wait if needed
         if wait_until and state in (STATE_PENDING_ON, STATE_PENDING_OFF):
             remaining = (wait_until - dt_util.now()).total_seconds()
             if remaining > 0:

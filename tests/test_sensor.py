@@ -58,7 +58,7 @@ class TestStoveControllerSensor:
     def test_native_value(self, sensor):
         """Test native_value property."""
         assert sensor.native_value == STATE_IDLE
-        sensor._state_machine._state = STATE_HEATING
+        sensor._state_machine.restore_state(STATE_HEATING, demand_on=True)
         assert sensor.native_value == STATE_HEATING
 
     def test_extra_state_attributes_basic(self, sensor):
@@ -95,18 +95,18 @@ class TestStoveControllerSensor:
 
     def test_in_grace_period_true(self, sensor):
         """Test in_grace_period is True during pending states."""
-        sensor._state_machine._state = STATE_PENDING_ON
+        sensor._state_machine.restore_state(STATE_PENDING_ON, demand_on=True)
         attrs = sensor.extra_state_attributes
         assert attrs["in_grace_period"]
-        sensor._state_machine._state = STATE_PENDING_OFF
+        sensor._state_machine.restore_state(STATE_PENDING_OFF, demand_on=False)
         attrs = sensor.extra_state_attributes
         assert attrs["in_grace_period"]
     def test_in_grace_period_false(self, sensor):
         """Test in_grace_period is False during non-pending states."""
-        sensor._state_machine._state = STATE_IDLE
+        sensor._state_machine.restore_state(STATE_IDLE, demand_on=False)
         attrs = sensor.extra_state_attributes
         assert not attrs["in_grace_period"]
-        sensor._state_machine._state = STATE_HEATING
+        sensor._state_machine.restore_state(STATE_HEATING, demand_on=True)
         attrs = sensor.extra_state_attributes
         assert not attrs["in_grace_period"]
 class TestSensorLifecycle:
