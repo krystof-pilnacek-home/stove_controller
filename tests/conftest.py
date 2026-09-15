@@ -123,9 +123,10 @@ async def setup_sensor_hass(make_sensor, monkeypatch):
     # test.  The tasks must be awaited to completion (not just cancelled) so
     # the HACC verify_cleanup plugin does not flag them as lingering.
     wait_tasks = [
-        sensor._wait_task
+        sensor._state_machine.wait_task
         for sensor in created
-        if sensor._wait_task is not None and not sensor._wait_task.done()
+        if sensor._state_machine.wait_task is not None
+        and not sensor._state_machine.wait_task.done()
     ]
     for sensor in created:
         # The wait timer lives on the state machine after the refactor; the

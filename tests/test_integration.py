@@ -95,7 +95,7 @@ class TestSwitchSensorIntegration:
         switch.hass = hass
 
         # Initially both off
-        assert not sensor._demand_on
+        assert not sensor._state_machine.demand_on
         # Simulate switch turning on - this fires an event
         switch._is_on = True
         await switch._notify_controller()
@@ -159,7 +159,7 @@ class TestSwitchSensorIntegration:
 
         await sensor._on_demand_change_event(event)
 
-        assert sensor._demand_on
+        assert sensor._state_machine.demand_on
         assert sensor._demand_entity_id == "switch.test_demand"
 
     @pytest.mark.asyncio
@@ -206,15 +206,15 @@ class TestSwitchSensorIntegration:
         }
 
         # Need to set up the state properly
-        sensor._last_off = dt_util.now() - timedelta(minutes=30)
+        sensor._state_machine._last_off = dt_util.now() - timedelta(minutes=30)
 
         await sensor._on_demand_change_event(event)
 
         # Sensor should now have demand_on = True
-        assert sensor._demand_on
+        assert sensor._state_machine.demand_on
         # Now evaluate state - relay is off, demand is on
         # Should transition to HEATING or PENDING_ON
-        await sensor._apply_demand_logic()
+        await sensor._state_machine._apply_demand_logic()
 
         # Since last_off was > 25 minutes ago, should go directly to HEATING
         # But relay is off, so it needs to turn on
@@ -234,7 +234,7 @@ class TestSwitchSensorIntegration:
         sensor.hass = hass
         sensor.async_write_ha_state = MagicMock()
         sensor.async_on_remove = MagicMock()
-        sensor._demand_on = True
+        sensor._state_machine._demand_on = True
 
         # Setup initial state
         relay_state_off = MagicMock()
@@ -261,8 +261,8 @@ class TestSwitchSensorIntegration:
         await sensor._on_relay_change(event)
 
         # Should have updated last_on timestamp
-        assert sensor._last_on is not None
-        assert sensor._last_off is None
+        assert sensor._state_machine.last_on is not None
+        assert sensor._state_machine.last_off is None
 
         # Should have written state
         sensor.async_write_ha_state.assert_called()
@@ -301,8 +301,8 @@ class TestEventBasedCommunication:
         await sensor2._on_demand_change_event(event2)
 
         # Each sensor should only respond to its own entry_id
-        assert sensor1._demand_on
-        assert sensor2._demand_on
+        assert sensor1._state_machine.demand_on
+        assert sensor2._state_machine.demand_on
     @pytest.mark.asyncio
     async def test_event_contains_entity_id(self, mock_hass_with_bus):
         """Test that demand change events include the switch entity ID."""
@@ -341,7 +341,7 @@ class TestBackwardsCompatibility:
         # Mock relay state to be OFF
         hass.states.is_state.return_value = False
         # Last off long ago so demand ON turns the relay on immediately.
-        sensor._last_off = datetime(2026, 1, 15, 19, 0, 0, tzinfo=UTC)
+        sensor._state_machine._last_off = datetime(2026, 1, 15, 19, 0, 0, tzinfo=UTC)
 
         with patch(
             "homeassistant.util.dt.now",
@@ -351,7 +351,7 @@ class TestBackwardsCompatibility:
 
         # Demand was set and the state machine applied the demand logic:
         # the relay turn_on service was called and we reached HEATING.
-        assert sensor._demand_on
+        assert sensor._state_machine.demand_on
         hass.services.async_call.assert_awaited_once_with(
             "switch", "turn_on", target={"entity_id": relay_entity}, blocking=True,
         )
@@ -374,7 +374,7 @@ class TestBackwardsCompatibility:
         # Mock relay state to be OFF
         hass.states.is_state.return_value = False
         # Set last_off to avoid waiting
-        sensor._last_off = datetime(2026, 1, 15, 19, 0, 0, tzinfo=UTC)
+        sensor._state_machine._last_off = datetime(2026, 1, 15, 19, 0, 0, tzinfo=UTC)
 
         with patch(
             "homeassistant.util.dt.now",
@@ -384,7 +384,7 @@ class TestBackwardsCompatibility:
 
         # sync_demand set the demand entity and drove the state machine
         # through the same path as a demand change.
-        assert sensor._demand_on
+        assert sensor._state_machine.demand_on
         assert sensor._demand_entity_id == "switch.test"
         hass.services.async_call.assert_awaited_once_with(
             "switch", "turn_on", target={"entity_id": relay_entity}, blocking=True,
