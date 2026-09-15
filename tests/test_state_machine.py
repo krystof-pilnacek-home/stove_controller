@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from stove_controller.const import (
     STATE_HEATING,
@@ -583,6 +584,35 @@ class TestUnknownRelayState:
         assert sm._last_off == original_last_off
         assert sm.state == STATE_UNAVAILABLE
 
+    @pytest.mark.parametrize("relay_state", ["unknown", "unavailable"])
+    @pytest.mark.asyncio
+    async def test_unknown_state_republishes_when_already_unavailable(
+        self, make_state_machine, relay_state
+    ):
+        """An unknown relay state while already UNAVAILABLE still republishes.
+
+        When the machine is already UNAVAILABLE, transition_to(UNAVAILABLE) is a
+        no-op (self-transition not in VALID_TRANSITIONS) that never fires the
+        on_state_change callback.  The unknown-state path must republish the
+        state directly so the owning sensor reflects the cancelled wait.
+        """
+        sm = make_state_machine()
+        sm._state = STATE_UNAVAILABLE
+        sm._demand_on = True
+        sm._wait_until = _now() + timedelta(seconds=100)
+        seen: list = []
+
+        async def callback(state):
+            seen.append(state)
+
+        sm.on_state_change = callback
+
+        await sm.update_relay_state(relay_state)
+
+        assert sm.wait_until is None
+        assert sm.state == STATE_UNAVAILABLE
+        assert seen == [STATE_UNAVAILABLE]
+
 
 # =============================================================================
 # Corner Case Tests - old_state=None Handling
@@ -659,7 +689,7 @@ class TestServiceFailureHandling:
         """Relay turn methods return False and log on service failure."""
         sm, hass = setup_state_machine_hass()
         hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
+            side_effect=HomeAssistantError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
@@ -667,6 +697,23 @@ class TestServiceFailureHandling:
 
         assert result is False
         mock_logger.error.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "turn_method",
+        ["_turn_on_relay", "_turn_off_relay"],
+    )
+    @pytest.mark.asyncio
+    async def test_relay_call_unexpected_error_propagates(
+        self, setup_state_machine_hass, turn_method
+    ):
+        """Unexpected (non-HomeAssistant) errors are not swallowed by the relay
+        methods; only HomeAssistant service failures are collapsed to False.
+        """
+        sm, hass = setup_state_machine_hass()
+        hass.services.async_call = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(RuntimeError):
+            await getattr(sm, turn_method)()
 
     @pytest.mark.parametrize(
         ("start_state", "demand_on", "complete_method", "expected_state"),
@@ -689,7 +736,7 @@ class TestServiceFailureHandling:
         sm._state = start_state
         sm._demand_on = demand_on
         hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
+            side_effect=HomeAssistantError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
@@ -724,7 +771,7 @@ class TestServiceFailureHandling:
         hass.states.is_state.return_value = relay_on
         setattr(sm, last_attr, _now() - timedelta(minutes=60))
         hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
+            side_effect=HomeAssistantError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
