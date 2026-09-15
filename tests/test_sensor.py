@@ -47,7 +47,7 @@ class TestStoveControllerSensor:
         assert sensor._attr_icon == "mdi:fire"
         assert not sensor._attr_should_poll
         assert sensor.native_value == STATE_IDLE
-        assert not sensor._demand_on
+        assert not sensor._state_machine.demand_on
     def test_device_info(self, sensor):
         """Test device info."""
         assert sensor._attr_device_info["identifiers"] == {(DOMAIN, "test_entry_id")}
@@ -58,7 +58,7 @@ class TestStoveControllerSensor:
     def test_native_value(self, sensor):
         """Test native_value property."""
         assert sensor.native_value == STATE_IDLE
-        sensor._state = STATE_HEATING
+        sensor._state_machine._state = STATE_HEATING
         assert sensor.native_value == STATE_HEATING
 
     def test_extra_state_attributes_basic(self, sensor):
@@ -80,8 +80,8 @@ class TestStoveControllerSensor:
     def test_extra_state_attributes_with_timestamps(self, sensor):
         """Test extra state attributes with timestamps."""
         now = datetime(2024, 1, 15, 12, 0, 0, tzinfo=dt_util.UTC)
-        sensor._last_on = now
-        sensor._last_off = now
+        sensor._state_machine._last_on = now
+        sensor._state_machine._last_off = now
 
         attrs = sensor.extra_state_attributes
         assert attrs["last_on"] == now.isoformat()
@@ -89,24 +89,24 @@ class TestStoveControllerSensor:
 
     def test_extra_state_attributes_with_wait_time(self, sensor):
         """Test extra state attributes with wait time remaining."""
-        sensor._wait_until = dt_util.now() + timedelta(seconds=100)
+        sensor._state_machine._wait_until = dt_util.now() + timedelta(seconds=100)
         attrs = sensor.extra_state_attributes
         assert attrs["time_remaining_sec"] > 0
 
     def test_in_grace_period_true(self, sensor):
         """Test in_grace_period is True during pending states."""
-        sensor._state = STATE_PENDING_ON
+        sensor._state_machine._state = STATE_PENDING_ON
         attrs = sensor.extra_state_attributes
         assert attrs["in_grace_period"]
-        sensor._state = STATE_PENDING_OFF
+        sensor._state_machine._state = STATE_PENDING_OFF
         attrs = sensor.extra_state_attributes
         assert attrs["in_grace_period"]
     def test_in_grace_period_false(self, sensor):
         """Test in_grace_period is False during non-pending states."""
-        sensor._state = STATE_IDLE
+        sensor._state_machine._state = STATE_IDLE
         attrs = sensor.extra_state_attributes
         assert not attrs["in_grace_period"]
-        sensor._state = STATE_HEATING
+        sensor._state_machine._state = STATE_HEATING
         attrs = sensor.extra_state_attributes
         assert not attrs["in_grace_period"]
 class TestSensorLifecycle:
@@ -134,9 +134,9 @@ class TestSensorLifecycle:
             await sensor.async_added_to_hass()
 
         assert sensor.native_value == STATE_HEATING
-        assert sensor._demand_on
-        assert sensor._last_on is not None
-        assert sensor._last_off is not None
+        assert sensor._state_machine.demand_on
+        assert sensor._state_machine.last_on is not None
+        assert sensor._state_machine.last_off is not None
 
     @pytest.mark.asyncio
     async def test_async_added_to_hass_no_previous_state(self, setup_sensor_hass):

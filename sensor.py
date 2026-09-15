@@ -1,6 +1,5 @@
 """Sensor platform for the Stove Controller integration."""
 
-import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -106,95 +105,9 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._demand_entity_id: str | None = None
 
     @property
-    def _state(self) -> str:
-        """Delegate to state machine state."""
-        return str(self._state_machine.state)
-
-    @_state.setter
-    def _state(self, value: str) -> None:
-        """Set state machine state.
-
-        Note: Directly sets internal state for backwards compatibility with tests.
-        In production, state transitions should go through transition_to() for
-        validation. This setter bypasses transition validation.
-        """
-        from .const import ControllerState
-        self._state_machine._state = ControllerState(value)
-
-    @property
-    def _demand_on(self) -> bool:
-        """Delegate to state machine demand_on."""
-        return self._state_machine.demand_on
-
-    @_demand_on.setter
-    def _demand_on(self, value: bool) -> None:
-        """Set state machine demand_on."""
-        self._state_machine._demand_on = value
-
-    @property
-    def _last_on(self) -> datetime | None:
-        """Delegate to state machine last_on."""
-        return self._state_machine.last_on
-
-    @_last_on.setter
-    def _last_on(self, value: datetime | None) -> None:
-        """Set state machine last_on."""
-        self._state_machine._last_on = value
-
-    @property
-    def _last_off(self) -> datetime | None:
-        """Delegate to state machine last_off."""
-        return self._state_machine.last_off
-
-    @_last_off.setter
-    def _last_off(self, value: datetime | None) -> None:
-        """Set state machine last_off."""
-        self._state_machine._last_off = value
-
-    @property
-    def _wait_until(self) -> datetime | None:
-        """Delegate to state machine wait_until."""
-        return self._state_machine.wait_until
-
-    @_wait_until.setter
-    def _wait_until(self, value: datetime | None) -> None:
-        """Set state machine wait_until."""
-        self._state_machine._wait_until = value
-
-    @property
-    def _wait_task(self) -> asyncio.Task | None:
-        """Delegate to state machine wait_task."""
-        return self._state_machine.wait_task
-
-    @_wait_task.setter
-    def _wait_task(self, value: asyncio.Task | None) -> None:
-        """Set state machine wait_task."""
-        self._state_machine._wait_task = value
-
-    @property
     def native_value(self) -> str:
         """Return the sensor state."""
         return str(self._state_machine.state)
-
-    def _get_state(self, entity_id: str) -> Any:
-        """Get entity state - delegate to HA."""
-        if self.hass is None:
-            return None
-        return self.hass.states.get(entity_id)
-
-    async def _evaluate_state(self) -> None:
-        """Delegate to state machine public API."""
-        await self._state_machine.evaluate()
-
-    def _compute_remaining(
-        self, last_time: datetime | None, min_duration: int
-    ) -> int:
-        """Delegate to state machine public API."""
-        return self._state_machine.compute_remaining(last_time, min_duration)
-
-    async def _apply_demand_logic(self) -> None:
-        """Delegate to state machine internal method."""
-        await self._state_machine._apply_demand_logic()
 
     def _start_periodic_update(self) -> None:
         """Start periodic state updates for the countdown."""

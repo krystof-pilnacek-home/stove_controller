@@ -22,6 +22,7 @@ class ControllerState(StrEnum):
     HEATING = "heating"
     PENDING_ON = "pending_on"
     PENDING_OFF = "pending_off"
+    UNAVAILABLE = "unavailable"
 
     def __str__(self) -> str:
         return self.value
@@ -36,3 +37,4 @@ STATE_IDLE: Final = ControllerState.IDLE
 STATE_HEATING: Final = ControllerState.HEATING
 STATE_PENDING_ON: Final = ControllerState.PENDING_ON
 STATE_PENDING_OFF: Final = ControllerState.PENDING_OFF
+STATE_UNAVAILABLE: Final = ControllerState.UNAVAILABLE

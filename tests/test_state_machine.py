@@ -12,6 +12,7 @@ from stove_controller.const import (
     STATE_IDLE,
     STATE_PENDING_OFF,
     STATE_PENDING_ON,
+    STATE_UNAVAILABLE,
 )
 from stove_controller.state_machine import StoveStateMachine
 
@@ -133,6 +134,7 @@ class TestProperties:
             (STATE_HEATING, False),
             (STATE_PENDING_ON, True),
             (STATE_PENDING_OFF, True),
+            (STATE_UNAVAILABLE, False),
         ],
     )
     def test_is_in_grace_period(self, make_state_machine, state, in_grace):
@@ -178,6 +180,17 @@ class TestTransitionValidation:
             (STATE_PENDING_ON, STATE_IDLE),
             (STATE_PENDING_OFF, STATE_IDLE),
             (STATE_PENDING_OFF, STATE_HEATING),
+            # Any state may become UNAVAILABLE when the relay goes away.
+            (STATE_IDLE, STATE_UNAVAILABLE),
+            (STATE_HEATING, STATE_UNAVAILABLE),
+            (STATE_PENDING_ON, STATE_UNAVAILABLE),
+            (STATE_PENDING_OFF, STATE_UNAVAILABLE),
+            # From UNAVAILABLE the machine re-evaluates demand once the relay
+            # state is known again.
+            (STATE_UNAVAILABLE, STATE_IDLE),
+            (STATE_UNAVAILABLE, STATE_HEATING),
+            (STATE_UNAVAILABLE, STATE_PENDING_ON),
+            (STATE_UNAVAILABLE, STATE_PENDING_OFF),
         ],
     )
     def test_valid_transition(self, make_state_machine, from_state, to_state):
@@ -194,6 +207,7 @@ class TestTransitionValidation:
             (STATE_HEATING, STATE_HEATING),
             (STATE_PENDING_ON, STATE_PENDING_ON),
             (STATE_PENDING_OFF, STATE_PENDING_OFF),
+            (STATE_UNAVAILABLE, STATE_UNAVAILABLE),
             # Cross-pending transitions are not direct.
             (STATE_PENDING_ON, STATE_PENDING_OFF),
             (STATE_PENDING_OFF, STATE_PENDING_ON),
@@ -516,48 +530,44 @@ class TestTransitions:
 class TestUnknownRelayState:
     """Tests for handling unknown/unavailable relay states."""
 
+    @pytest.mark.parametrize("relay_state", ["unknown", "unavailable"])
     @pytest.mark.asyncio
-    async def test_unknown_state_transitions_to_idle(self, make_state_machine):
-        """Unknown relay state transitions to IDLE."""
+    async def test_unknown_state_transitions_to_unavailable(
+        self, make_state_machine, relay_state
+    ):
+        """Unknown/unavailable relay state transitions to UNAVAILABLE."""
         sm = make_state_machine()
         sm._state = STATE_HEATING
         sm._demand_on = True
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm.update_relay_state("unknown")
+            await sm.update_relay_state(relay_state)
 
         mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_IDLE
+        assert sm.state == STATE_UNAVAILABLE
 
+    @pytest.mark.parametrize("relay_state", ["unknown", "unavailable"])
     @pytest.mark.asyncio
-    async def test_unavailable_state_transitions_to_idle(self, make_state_machine):
-        """Unavailable relay state transitions to IDLE."""
-        sm = make_state_machine()
-        sm._state = STATE_HEATING
-        sm._demand_on = True
-
-        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm.update_relay_state("unavailable")
-
-        mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_IDLE
-
-    @pytest.mark.asyncio
-    async def test_unknown_state_cancels_wait(self, make_state_machine):
-        """Unknown relay state cancels active wait."""
+    async def test_unknown_state_cancels_wait(
+        self, make_state_machine, relay_state
+    ):
+        """Unknown/unavailable relay state cancels active wait."""
         sm = make_state_machine()
         sm._state = STATE_PENDING_ON
         sm._demand_on = True
         sm._wait_until = _now() + timedelta(seconds=100)
 
-        await sm.update_relay_state("unknown")
+        await sm.update_relay_state(relay_state)
 
         assert sm.wait_until is None
-        assert sm.state == STATE_IDLE
+        assert sm.state == STATE_UNAVAILABLE
 
+    @pytest.mark.parametrize("relay_state", ["unknown", "unavailable"])
     @pytest.mark.asyncio
-    async def test_unknown_state_preserves_timestamps(self, make_state_machine):
-        """Unknown relay state preserves timestamps."""
+    async def test_unknown_state_preserves_timestamps(
+        self, make_state_machine, relay_state
+    ):
+        """Unknown/unavailable relay state preserves timestamps."""
         sm = make_state_machine()
         sm._state = STATE_HEATING
         sm._demand_on = True
@@ -567,11 +577,11 @@ class TestUnknownRelayState:
         original_last_on = sm._last_on
         original_last_off = sm._last_off
 
-        await sm.update_relay_state("unknown")
+        await sm.update_relay_state(relay_state)
 
         assert sm._last_on == original_last_on
         assert sm._last_off == original_last_off
-        assert sm.state == STATE_IDLE
+        assert sm.state == STATE_UNAVAILABLE
 
 
 # =============================================================================
@@ -638,111 +648,90 @@ class TestOldStateNoneHandling:
 class TestServiceFailureHandling:
     """Tests for handling relay service call failures."""
 
+    @pytest.mark.parametrize(
+        "turn_method",
+        ["_turn_on_relay", "_turn_off_relay"],
+    )
     @pytest.mark.asyncio
-    async def test_turn_on_relay_failure_returns_false(self, setup_state_machine_hass):
-        """_turn_on_relay returns False on failure."""
+    async def test_relay_call_failure_returns_false(
+        self, setup_state_machine_hass, turn_method
+    ):
+        """Relay turn methods return False and log on service failure."""
         sm, hass = setup_state_machine_hass()
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            result = await sm._turn_on_relay()
+            result = await getattr(sm, turn_method)()
 
         assert result is False
         mock_logger.error.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("start_state", "demand_on", "complete_method", "expected_state"),
+        [
+            (STATE_PENDING_ON, True, "_complete_turn_on", STATE_IDLE),
+            (STATE_PENDING_OFF, False, "_complete_turn_off", STATE_HEATING),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_turn_off_relay_failure_returns_false(self, setup_state_machine_hass):
-        """_turn_off_relay returns False on failure."""
-        sm, hass = setup_state_machine_hass()
-        hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
-        )
-
-        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            result = await sm._turn_off_relay()
-
-        assert result is False
-        mock_logger.error.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_complete_turn_on_failure_transitions_to_idle(
-        self, setup_state_machine_hass
+    async def test_complete_failure_transitions(
+        self,
+        setup_state_machine_hass,
+        start_state,
+        demand_on,
+        complete_method,
+        expected_state,
     ):
-        """_complete_turn_on on failure transitions PENDING_ON to IDLE."""
+        """Post-wait completion transitions to the relay-honest state on failure."""
         sm, hass = setup_state_machine_hass()
-        sm._state = STATE_PENDING_ON
-        sm._demand_on = True
+        sm._state = start_state
+        sm._demand_on = demand_on
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm._complete_turn_on()
+            await getattr(sm, complete_method)()
 
         mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_IDLE
+        assert sm.state == expected_state
 
+    @pytest.mark.parametrize(
+        ("start_state", "demand_on", "relay_on", "last_attr", "expected_state"),
+        [
+            # Immediate turn-on failure: relay still off -> IDLE.
+            (STATE_IDLE, True, False, "_last_off", STATE_IDLE),
+            # Immediate turn-off failure: relay still on -> HEATING.
+            (STATE_HEATING, False, True, "_last_on", STATE_HEATING),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_complete_turn_off_failure_transitions_to_heating(
-        self, setup_state_machine_hass
+    async def test_apply_demand_logic_failure_transitions(
+        self,
+        setup_state_machine_hass,
+        start_state,
+        demand_on,
+        relay_on,
+        last_attr,
+        expected_state,
     ):
-        """_complete_turn_off on failure transitions PENDING_OFF to HEATING."""
+        """Immediate (no-wait) relay failure transitions to the relay-honest state."""
         sm, hass = setup_state_machine_hass()
-        sm._state = STATE_PENDING_OFF
-        sm._demand_on = False
+        sm._state = start_state
+        sm._demand_on = demand_on
+        hass.states.is_state.return_value = relay_on
+        setattr(sm, last_attr, _now() - timedelta(minutes=60))
         hass.services.async_call = AsyncMock(
             side_effect=RuntimeError("Service not available")
         )
 
         with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm._complete_turn_off()
+            await sm._apply_demand_logic(relay_on=relay_on)
 
         mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_HEATING
-
-    @pytest.mark.asyncio
-    async def test_apply_demand_logic_turn_on_failure_goes_idle(
-        self, setup_state_machine_hass
-    ):
-        """Immediate (no-wait) turn-on failure transitions to IDLE, not HEATING."""
-        sm, hass = setup_state_machine_hass()
-        sm._state = STATE_IDLE
-        sm._demand_on = True
-        # Relay off, no min_off wait remaining -> immediate turn-on path
-        hass.states.is_state.return_value = False
-        sm._last_off = _now() - timedelta(minutes=60)
-        hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
-        )
-
-        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm._apply_demand_logic(relay_on=False)
-
-        mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_IDLE
-
-    @pytest.mark.asyncio
-    async def test_apply_demand_logic_turn_off_failure_goes_heating(
-        self, setup_state_machine_hass
-    ):
-        """Immediate (no-wait) turn-off failure transitions to HEATING, not IDLE."""
-        sm, hass = setup_state_machine_hass()
-        sm._state = STATE_HEATING
-        sm._demand_on = False
-        # Relay on, no min_on wait remaining -> immediate turn-off path
-        hass.states.is_state.return_value = True
-        sm._last_on = _now() - timedelta(minutes=60)
-        hass.services.async_call = AsyncMock(
-            side_effect=RuntimeError("Service not available")
-        )
-
-        with patch("stove_controller.state_machine._LOGGER") as mock_logger:
-            await sm._apply_demand_logic(relay_on=True)
-
-        mock_logger.warning.assert_called_once()
-        assert sm.state == STATE_HEATING
+        assert sm.state == expected_state
 
     @pytest.mark.asyncio
     async def test_start_wait_republishes_state(self, setup_state_machine_hass):
