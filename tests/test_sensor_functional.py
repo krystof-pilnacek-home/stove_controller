@@ -778,9 +778,9 @@ class TestScenario8AdditionalCoverage:
 
     @pytest.mark.asyncio
     async def test_on_relay_change_old_state_is_none(self, setup_sensor_hass):
-        """_on_relay_change handles old_state=None (HA restart) by re-evaluating."""
+        """Restart path preserves restored timestamps (no state loss)."""
         sensor, hass = setup_sensor_hass()
-        # Set previous timestamps
+        # Restored timestamps from before the restart
         sensor._state_machine._last_on = _now() - timedelta(minutes=5)
         sensor._state_machine._last_off = _now() - timedelta(minutes=10)
 
@@ -790,16 +790,56 @@ class TestScenario8AdditionalCoverage:
         mock_new_state.state = STATE_ON
         mock_event.data = {"new_state": mock_new_state, "old_state": None}
 
-        # Mock hass.states.is_state to return False (relay is off)
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sensor._on_relay_change(mock_event)
+
+        # Restored timestamps are preserved across the restart so on/off
+        # history is not lost.
+        assert sensor._state_machine.last_on == _now() - timedelta(minutes=5)
+        assert sensor._state_machine.last_off == _now() - timedelta(minutes=10)
+
+    @pytest.mark.asyncio
+    async def test_on_relay_change_old_state_none_off(self, setup_sensor_hass):
+        """Restart path preserves restored _last_off when relay reports OFF."""
+        sensor, hass = setup_sensor_hass()
+        sensor._state_machine._last_on = _now() - timedelta(minutes=5)
+        sensor._state_machine._last_off = _now() - timedelta(minutes=10)
+
+        mock_event = MagicMock()
+        mock_new_state = MagicMock()
+        mock_new_state.state = STATE_OFF
+        mock_event.data = {"new_state": mock_new_state, "old_state": None}
+
         hass.states.is_state.return_value = False
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sensor._on_relay_change(mock_event)
 
-        # Timestamps should be preserved during old_state=None scenario
-        assert sensor._state_machine.last_on == _now() - timedelta(minutes=5)
         assert sensor._state_machine.last_off == _now() - timedelta(minutes=10)
-        # State should have been re-evaluated based on demand
+        assert sensor._state_machine.last_on == _now() - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_on_relay_change_old_state_none_marks_unset_timestamp(
+        self, setup_sensor_hass
+    ):
+        """Restart path marks the timestamp when it was not yet known."""
+        sensor, hass = setup_sensor_hass()
+        # No restored timestamps: relay reports ON but _last_on is unknown
+        sensor._state_machine._last_on = None
+        sensor._state_machine._last_off = _now() - timedelta(minutes=10)
+
+        mock_event = MagicMock()
+        mock_new_state = MagicMock()
+        mock_new_state.state = STATE_ON
+        mock_event.data = {"new_state": mock_new_state, "old_state": None}
+
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sensor._on_relay_change(mock_event)
+
+        # An unknown timestamp for the relay's reported state is marked now so
+        # grace periods are not computed from a stale/None value.
+        assert sensor._state_machine.last_on == _now()
+        assert sensor._state_machine.last_off == _now() - timedelta(minutes=10)
 
     @pytest.mark.asyncio
     async def test_on_relay_change_no_new_state(self, setup_sensor_hass):

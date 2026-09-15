@@ -606,8 +606,9 @@ class TestOldStateNoneHandling:
         # Set relay to off
         hass.states.is_state.return_value = False
 
-        # When old_state is None, sensor._on_relay_change calls evaluate() instead
-        # So we test evaluate() directly
+        # evaluate() re-applies demand logic without touching timestamps; the
+        # restart timestamp handling lives in _on_relay_change (via
+        # update_relay_appearance), tested at the sensor level.
         await sm.evaluate()
 
         # Should have re-evaluated and transitioned based on demand and relay state
@@ -630,14 +631,61 @@ class TestOldStateNoneHandling:
 
         hass.states.is_state.return_value = False
 
-        # When old_state is None, sensor._on_relay_change calls evaluate() instead
-        # So we test evaluate() directly
+        # evaluate() re-applies demand logic without touching timestamps.
         await sm.evaluate()
 
         # Timestamps should be preserved when no action is needed
         assert sm._last_on == original_last_on
         assert sm._last_off == original_last_off
         assert sm.state == STATE_IDLE
+
+    @pytest.mark.asyncio
+    async def test_update_relay_appearance_preserves_known_timestamp(
+        self, setup_state_machine_hass
+    ):
+        """update_relay_appearance keeps a restored timestamp for the reported state."""
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_HEATING
+        sm._demand_on = True
+        original_last_on = _now() - timedelta(minutes=5)
+        sm._last_on = original_last_on
+        sm._last_off = _now() - timedelta(minutes=20)
+
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sm.update_relay_appearance("on")
+
+        assert sm._last_on == original_last_on
+        assert sm._last_off == _now() - timedelta(minutes=20)
+
+    @pytest.mark.asyncio
+    async def test_update_relay_appearance_marks_unknown_timestamp(
+        self, setup_state_machine_hass
+    ):
+        """update_relay_appearance marks the timestamp when it was not known."""
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_IDLE
+        sm._demand_on = False
+        sm._last_on = _now() - timedelta(minutes=5)
+        sm._last_off = None
+
+        with patch("homeassistant.util.dt.now", return_value=_now()):
+            await sm.update_relay_appearance("off")
+
+        assert sm._last_off == _now()
+        assert sm._last_on == _now() - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
+    async def test_update_relay_appearance_unknown_state_goes_unavailable(
+        self, setup_state_machine_hass
+    ):
+        """update_relay_appearance routes unknown relay state to UNAVAILABLE."""
+        sm, hass = setup_state_machine_hass()
+        sm._state = STATE_HEATING
+        sm._demand_on = True
+
+        await sm.update_relay_appearance("unavailable")
+
+        assert sm.state == STATE_UNAVAILABLE
 
 
 # =============================================================================

@@ -254,10 +254,13 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         # itself into update_relay_state (which expects a str).
         new_state_str = new_state.state
 
-        # Handle relay appearance event (old_state=None, e.g., HA restart)
-        # Preserve timestamps but re-evaluate demand
+        # Handle relay appearance event (old_state=None, e.g., HA restart):
+        # re-evaluate demand, preserving timestamps restored from the previous
+        # run so on/off history survives the restart.  The timestamp for the
+        # relay's reported state is marked only when it was not already known,
+        # so grace periods are never computed from a stale/unknown timestamp.
         if old_state is None:
-            await self._state_machine.evaluate()
+            await self._state_machine.update_relay_appearance(new_state_str)
             return
 
         # Skip if state hasn't actually changed
