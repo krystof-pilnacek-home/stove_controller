@@ -47,14 +47,12 @@ async def async_setup_entry(
         entry.entry_id, relay_entity, min_on_min, min_off_min, update_interval
     )
 
-    # Create subordinate sensors that surface on the device page
     remaining_sensor = StoveRemainingTimeSensor(entry.entry_id, sensor)
     last_on_sensor = StoveLastOnSensor(entry.entry_id, sensor)
     last_off_sensor = StoveLastOffSensor(entry.entry_id, sensor)
 
     sensor._sub_sensors = [remaining_sensor, last_on_sensor, last_off_sensor]
 
-    # Store reference for backwards compatibility with __init__.py sync
     store = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
     store["sensor"] = sensor
     async_add_entities([sensor, remaining_sensor, last_on_sensor, last_off_sensor])
@@ -92,7 +90,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             model="A251 Controller",
         )
 
-        # Initialize state machine
         self._state_machine = StoveStateMachine(
             hass=None,
             relay_entity=relay_entity,
@@ -159,7 +156,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         self._state_machine.hass = self.hass
         self._state_machine.on_state_change = self._on_state_change
 
-        # Restore state
         if (last_state := await self.async_get_last_state()) is not None:
             self._state_machine.restore_state(
                 state=last_state.state,
@@ -245,21 +241,18 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
 
-        # Skip if no new state
         if new_state is None:
             return
 
-        # Handle relay appearance event (old_state=None, e.g., HA restart)
-        # Preserve timestamps but re-evaluate demand
+        # On HA restart the relay entity fires an appearance event with
+        # old_state=None; preserve timestamps and re-evaluate demand.
         if old_state is None:
             await self._state_machine.evaluate()
             return
 
-        # Skip if state hasn't actually changed
         if old_state.state == new_state.state:
             return
 
-        # Extract state string
         new_state_str = new_state.state if hasattr(new_state, 'state') else new_state
 
         await self._state_machine.update_relay_state(new_state_str)
