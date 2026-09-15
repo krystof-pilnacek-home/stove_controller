@@ -15,7 +15,7 @@ Scenarios:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
@@ -59,7 +59,7 @@ class TestScenario1SimpleCases:
             await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         # Should have called turn_on service
         hass.services.async_call.assert_awaited_once()
         call_args = hass.services.async_call.call_args
@@ -84,7 +84,7 @@ class TestScenario1SimpleCases:
             await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # Should have called turn_off service
         hass.services.async_call.assert_awaited_once()
         call_args = hass.services.async_call.call_args
@@ -102,7 +102,7 @@ class TestScenario1SimpleCases:
         await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         # No service call needed
         hass.services.async_call.assert_not_awaited()
 
@@ -117,7 +117,7 @@ class TestScenario1SimpleCases:
         await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # No service call needed
         hass.services.async_call.assert_not_awaited()
 
@@ -145,7 +145,7 @@ class TestScenario2WaitTriggered:
             await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_PENDING_ON
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._wait_task is not None
         assert sensor._wait_until is not None
         # Should NOT have called turn_on service yet
@@ -172,7 +172,7 @@ class TestScenario2WaitTriggered:
             await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_PENDING_OFF
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         assert sensor._wait_task is not None
         assert sensor._wait_until is not None
         # Should NOT have called turn_off service yet
@@ -200,14 +200,15 @@ class TestScenario2WaitTriggered:
         # Simulate wait completion: cancel the real wait task (instead of
         # orphaning it by nilling the reference) so no _wait_and_execute
         # task lingers after the test.
-        sensor._cancel_wait()
+        sensor._state_machine.cancel_wait()
         assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
         with patch(
             "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
         ):
-            await sensor._do_turn_on()
+            # Call the completion callback directly
+            await sensor._state_machine._complete_turn_on()
 
         assert sensor._state == STATE_HEATING
         hass.services.async_call.assert_awaited_once()
@@ -230,14 +231,15 @@ class TestScenario2WaitTriggered:
         # Simulate wait completion: cancel the real wait task (instead of
         # orphaning it by nilling the reference) so no _wait_and_execute
         # task lingers after the test.
-        sensor._cancel_wait()
+        sensor._state_machine.cancel_wait()
         assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
         with patch(
             "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
         ):
-            await sensor._do_turn_off()
+            # Call the completion callback directly
+            await sensor._state_machine._complete_turn_off()
 
         assert sensor._state == STATE_IDLE
         hass.services.async_call.assert_awaited_once()
@@ -272,7 +274,7 @@ class TestScenario3DemandReversal:
         assert sensor._wait_task is None
         assert sensor._wait_until is None
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
 
     @pytest.mark.asyncio
     async def test_demand_on_during_pending_off(self, setup_sensor_hass):
@@ -297,7 +299,7 @@ class TestScenario3DemandReversal:
         assert sensor._wait_task is None
         assert sensor._wait_until is None
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
 
 
 # =============================================================================
@@ -328,14 +330,14 @@ class TestScenario3bDemandAtTimerCompletion:
         # Simulate demand changing back to ON during the wait
         await sensor.handle_demand_change(demand_on=True)
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
 
         # Now simulate wait completion (even though demand is now ON)
-        # The _do_turn_off should check demand_on and not turn off
+        # The _complete_turn_off should check demand_on and not turn off
         with patch(
             "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
         ):
-            await sensor._do_turn_off()
+            await sensor._state_machine._complete_turn_off()
 
         # Should NOT have called turn_off service
         # Should have set HEATING state
@@ -368,14 +370,14 @@ class TestScenario3bDemandAtTimerCompletion:
         # Simulate demand changing back to OFF during the wait
         await sensor.handle_demand_change(demand_on=False)
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
 
         # Now simulate wait completion (even though demand is now OFF)
-        # The _do_turn_on should check demand_on and not turn on
+        # The _complete_turn_on should check demand_on and not turn on
         with patch(
             "homeassistant.util.dt.now", return_value=_now() + timedelta(minutes=15)
         ):
-            await sensor._do_turn_on()
+            await sensor._state_machine._complete_turn_on()
 
         # Should NOT have called turn_on service
         # Should have set IDLE state
@@ -666,7 +668,7 @@ class TestScenario8AdditionalCoverage:
         await sensor.handle_demand_change(demand_on=False)
 
         # Should return early, no state change
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # async_write_ha_state should not be called
         sensor.async_write_ha_state.assert_not_called()
 
@@ -674,33 +676,41 @@ class TestScenario8AdditionalCoverage:
     async def test_sync_demand_calls_evaluate_state(
         self, setup_sensor_hass, monkeypatch
     ):
-        """sync_demand updates demand and calls _evaluate_state."""
-        sensor, _ = setup_sensor_hass()
+        """sync_demand updates demand and applies demand logic."""
+        sensor, hass = setup_sensor_hass()
 
         sensor._demand_on = False
-        monkeypatch.setattr(sensor, "_evaluate_state", AsyncMock())
+        # Mock the relay state to be OFF
+        hass.states.is_state.return_value = False
+        # Set last_off to be beyond min_off_duration so no wait is needed
+        sensor._last_off = _now() - timedelta(minutes=30)
 
         await sensor.sync_demand(demand_on=True, demand_entity_id="switch.test")
 
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._demand_entity_id == "switch.test"
-        sensor._evaluate_state.assert_awaited_once()
+        # Verify state was updated based on demand logic - should be HEATING
+        assert sensor._state == STATE_HEATING
 
     @pytest.mark.asyncio
     async def test_sync_demand_without_entity_id(
         self, setup_sensor_hass, monkeypatch
     ):
         """sync_demand works without demand_entity_id."""
-        sensor, _ = setup_sensor_hass()
+        sensor, hass = setup_sensor_hass()
 
         sensor._demand_on = False
-        monkeypatch.setattr(sensor, "_evaluate_state", AsyncMock())
+        # Mock the relay state to be OFF
+        hass.states.is_state.return_value = False
+        # Set last_off to be beyond min_off_duration so no wait is needed
+        sensor._last_off = _now() - timedelta(minutes=30)
 
         await sensor.sync_demand(demand_on=True)
 
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._demand_entity_id is None
-        sensor._evaluate_state.assert_awaited_once()
+        # Verify state was updated based on demand logic - should be HEATING
+        assert sensor._state == STATE_HEATING
 
     @pytest.mark.asyncio
     async def test_evaluate_state_relay_not_available(self, setup_sensor_hass):
@@ -712,7 +722,7 @@ class TestScenario8AdditionalCoverage:
         sensor._demand_on = True
 
         with patch("homeassistant.util.dt.now", return_value=_now()):
-            with patch("stove_controller.sensor._LOGGER") as mock_logger:
+            with patch("stove_controller.state_machine._LOGGER") as mock_logger:
                 await sensor._evaluate_state()
 
         # Should set to IDLE and log warning
