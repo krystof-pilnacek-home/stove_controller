@@ -249,6 +249,11 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         if new_state is None:
             return
 
+        # Extract state string.  By this point new_state is a Home Assistant
+        # State object, so it always exposes ``state``; never pass the object
+        # itself into update_relay_state (which expects a str).
+        new_state_str = new_state.state
+
         # Handle relay appearance event (old_state=None, e.g., HA restart)
         # Preserve timestamps but re-evaluate demand
         if old_state is None:
@@ -256,11 +261,8 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             return
 
         # Skip if state hasn't actually changed
-        if old_state.state == new_state.state:
+        if old_state.state == new_state_str:
             return
-
-        # Extract state string
-        new_state_str = new_state.state if hasattr(new_state, 'state') else new_state
 
         await self._state_machine.update_relay_state(new_state_str)
 
