@@ -23,9 +23,8 @@ class TestStoveDemandSwitch:
         assert switch._attr_name == "Stove Demand"
         assert switch._attr_unique_id == "test_entry_id_stove_demand"
         assert switch._attr_icon == "mdi:toggle-switch"
-        assert switch._attr_should_poll is False
-        assert switch._is_on is False
-
+        assert not switch._attr_should_poll
+        assert not switch._is_on
     def test_device_info(self, switch):
         """Test device info."""
         assert switch._attr_device_info["identifiers"] == {(DOMAIN, "test_entry_id")}
@@ -35,10 +34,9 @@ class TestStoveDemandSwitch:
 
     def test_is_on_property(self, switch):
         """Test is_on property."""
-        assert switch.is_on is False
+        assert not switch.is_on
         switch._is_on = True
-        assert switch.is_on is True
-
+        assert switch.is_on
     @pytest.mark.asyncio
     async def test_async_turn_on(self, switch):
         """Test turning on the switch."""
@@ -49,7 +47,7 @@ class TestStoveDemandSwitch:
 
         await switch.async_turn_on()
 
-        assert switch._is_on is True
+        assert switch._is_on
         switch.async_write_ha_state.assert_called_once()
         switch._notify_controller.assert_called_once()
 
@@ -63,7 +61,7 @@ class TestStoveDemandSwitch:
 
         await switch.async_turn_off()
 
-        assert switch._is_on is False
+        assert not switch._is_on
         switch.async_write_ha_state.assert_called_once()
         switch._notify_controller.assert_called_once()
 
@@ -78,8 +76,7 @@ class TestStoveDemandSwitch:
 
         await switch.async_added_to_hass()
 
-        assert switch._is_on is True
-
+        assert switch._is_on
     @pytest.mark.asyncio
     async def test_async_added_to_hass_no_previous_state(self, switch):
         """Test switch with no previous state."""
@@ -88,8 +85,7 @@ class TestStoveDemandSwitch:
 
         await switch.async_added_to_hass()
 
-        assert switch._is_on is False
-
+        assert not switch._is_on
     @pytest.mark.asyncio
     async def test_notify_controller_with_sensor(self, switch):
         """Test notifying controller via event bus."""
@@ -105,8 +101,7 @@ class TestStoveDemandSwitch:
         switch.hass.bus.async_fire.assert_called_once()
         call_args = switch.hass.bus.async_fire.call_args
         assert call_args[0][0] == "stove_controller_demand_changed"
-        assert call_args[0][1]["demand_on"] is True
-
+        assert call_args[0][1]["demand_on"]
     @pytest.mark.asyncio
     async def test_notify_controller_without_sensor(self, switch):
         """Test notifying controller via event bus (no direct sensor dependency)."""

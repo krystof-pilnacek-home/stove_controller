@@ -243,7 +243,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         await super().async_added_to_hass()
 
         self._state_machine.hass = self.hass
-        self._state_machine.register_on_state_change(self._on_state_change)
+        self._state_machine.on_state_change = self._on_state_change
 
         # Restore state
         if (last_state := await self.async_get_last_state()) is not None:
@@ -312,7 +312,7 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
         """Sync demand state from the switch."""
         if demand_entity_id is not None:
             self._demand_entity_id = demand_entity_id
-        await self._state_machine.sync_demand(demand_on)
+        await self._state_machine.set_demand(demand_on)
 
     @callback
     async def _on_demand_change_event(self, event: Event) -> None:

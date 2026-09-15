@@ -1,5 +1,7 @@
 """Tests for the StoveStateMachine class."""
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,25 +27,46 @@ def _now() -> datetime:
 
 
 @pytest.fixture
-def make_state_machine():
-    """Factory fixture to create a StoveStateMachine."""
+async def make_state_machine():
+    """Factory fixture to create a StoveStateMachine.
+
+    Tracks every created state machine and cancels any pending wait task on
+    teardown, so a failing assertion mid-test cannot leak a ``wait_and_execute``
+    task.
+    """
+    created: list[StoveStateMachine] = []
+
     def _make(
         hass: MagicMock | None = None,
         relay_entity: str = "switch.test_relay",
         min_on_min: int = 30,
         min_off_min: int = 25,
     ) -> StoveStateMachine:
-        return StoveStateMachine(
+        sm = StoveStateMachine(
             hass=hass,
             relay_entity=relay_entity,
             min_on_duration=min_on_min * 60,
             min_off_duration=min_off_min * 60,
         )
-    return _make
+        created.append(sm)
+        return sm
+
+    yield _make
+
+    wait_tasks = [
+        sm.wait_task
+        for sm in created
+        if sm.wait_task is not None and not sm.wait_task.done()
+    ]
+    for sm in created:
+        sm.cancel_wait()
+    for task in wait_tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 @pytest.fixture
-def setup_state_machine_hass(make_state_machine):
+async def setup_state_machine_hass(make_state_machine):
     """Factory fixture to set up a state machine with a mock hass."""
     def _setup(
         relay_entity: str = "switch.test_relay",
@@ -60,7 +83,8 @@ def setup_state_machine_hass(make_state_machine):
 
         sm = make_state_machine(hass, relay_entity, min_on_min, min_off_min)
         return sm, hass
-    return _setup
+
+    yield _setup
 
 
 # =============================================================================
@@ -75,7 +99,7 @@ class TestInitialization:
         """Test default initialization."""
         sm = make_state_machine()
         assert sm.state == STATE_IDLE
-        assert sm.demand_on is False
+        assert not sm.demand_on
         assert sm.last_on is None
         assert sm.last_off is None
         assert sm.wait_until is None
@@ -102,28 +126,20 @@ class TestInitialization:
 class TestProperties:
     """Test state machine properties."""
 
-    def test_is_in_grace_period_false_idle(self, make_state_machine):
-        """IDLE state is not in grace period."""
+    @pytest.mark.parametrize(
+        ("state", "in_grace"),
+        [
+            (STATE_IDLE, False),
+            (STATE_HEATING, False),
+            (STATE_PENDING_ON, True),
+            (STATE_PENDING_OFF, True),
+        ],
+    )
+    def test_is_in_grace_period(self, make_state_machine, state, in_grace):
+        """Grace period is only active in PENDING_* states."""
         sm = make_state_machine()
-        assert sm.is_in_grace_period is False
-
-    def test_is_in_grace_period_false_heating(self, make_state_machine):
-        """HEATING state is not in grace period."""
-        sm = make_state_machine()
-        sm._state = STATE_HEATING
-        assert sm.is_in_grace_period is False
-
-    def test_is_in_grace_period_true_pending_on(self, make_state_machine):
-        """PENDING_ON state is in grace period."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_ON
-        assert sm.is_in_grace_period is True
-
-    def test_is_in_grace_period_true_pending_off(self, make_state_machine):
-        """PENDING_OFF state is in grace period."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_OFF
-        assert sm.is_in_grace_period is True
+        sm._state = state
+        assert sm.is_in_grace_period == in_grace
 
     def test_get_remaining_seconds_no_wait(self, make_state_machine):
         """No wait in progress returns 0."""
@@ -149,62 +165,45 @@ class TestProperties:
 class TestTransitionValidation:
     """Test state transition validation."""
 
-    def test_valid_transition_idle_to_heating(self, make_state_machine):
-        """IDLE -> HEATING is valid."""
+    @pytest.mark.parametrize(
+        ("from_state", "to_state"),
+        [
+            (STATE_IDLE, STATE_HEATING),
+            (STATE_IDLE, STATE_PENDING_ON),
+            (STATE_IDLE, STATE_PENDING_OFF),
+            (STATE_HEATING, STATE_IDLE),
+            (STATE_HEATING, STATE_PENDING_OFF),
+            (STATE_HEATING, STATE_PENDING_ON),
+            (STATE_PENDING_ON, STATE_HEATING),
+            (STATE_PENDING_ON, STATE_IDLE),
+            (STATE_PENDING_OFF, STATE_IDLE),
+            (STATE_PENDING_OFF, STATE_HEATING),
+        ],
+    )
+    def test_valid_transition(self, make_state_machine, from_state, to_state):
+        """Valid transitions are accepted."""
         sm = make_state_machine()
-        assert sm.is_valid_transition(STATE_HEATING) is True
+        sm._state = from_state
+        assert sm.is_valid_transition(to_state)
 
-    def test_valid_transition_idle_to_pending_on(self, make_state_machine):
-        """IDLE -> PENDING_ON is valid."""
+    @pytest.mark.parametrize(
+        ("from_state", "to_state"),
+        [
+            # A state is never a valid transition target from itself.
+            (STATE_IDLE, STATE_IDLE),
+            (STATE_HEATING, STATE_HEATING),
+            (STATE_PENDING_ON, STATE_PENDING_ON),
+            (STATE_PENDING_OFF, STATE_PENDING_OFF),
+            # Cross-pending transitions are not direct.
+            (STATE_PENDING_ON, STATE_PENDING_OFF),
+            (STATE_PENDING_OFF, STATE_PENDING_ON),
+        ],
+    )
+    def test_invalid_transition(self, make_state_machine, from_state, to_state):
+        """Invalid transitions are rejected."""
         sm = make_state_machine()
-        assert sm.is_valid_transition(STATE_PENDING_ON) is True
-
-    def test_valid_transition_idle_to_pending_off(self, make_state_machine):
-        """IDLE -> PENDING_OFF is valid (relay ON but demand OFF)."""
-        sm = make_state_machine()
-        assert sm.is_valid_transition(STATE_PENDING_OFF) is True
-
-    def test_valid_transition_heating_to_idle(self, make_state_machine):
-        """HEATING -> IDLE is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_HEATING
-        assert sm.is_valid_transition(STATE_IDLE) is True
-
-    def test_valid_transition_heating_to_pending_off(self, make_state_machine):
-        """HEATING -> PENDING_OFF is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_HEATING
-        assert sm.is_valid_transition(STATE_PENDING_OFF) is True
-
-    def test_valid_transition_heating_to_pending_on(self, make_state_machine):
-        """HEATING -> PENDING_ON is valid (relay OFF but demand ON)."""
-        sm = make_state_machine()
-        sm._state = STATE_HEATING
-        assert sm.is_valid_transition(STATE_PENDING_ON) is True
-
-    def test_valid_transition_pending_on_to_heating(self, make_state_machine):
-        """PENDING_ON -> HEATING is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_ON
-        assert sm.is_valid_transition(STATE_HEATING) is True
-
-    def test_valid_transition_pending_on_to_idle(self, make_state_machine):
-        """PENDING_ON -> IDLE is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_ON
-        assert sm.is_valid_transition(STATE_IDLE) is True
-
-    def test_valid_transition_pending_off_to_idle(self, make_state_machine):
-        """PENDING_OFF -> IDLE is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_OFF
-        assert sm.is_valid_transition(STATE_IDLE) is True
-
-    def test_valid_transition_pending_off_to_heating(self, make_state_machine):
-        """PENDING_OFF -> HEATING is valid."""
-        sm = make_state_machine()
-        sm._state = STATE_PENDING_OFF
-        assert sm.is_valid_transition(STATE_HEATING) is True
+        sm._state = from_state
+        assert not sm.is_valid_transition(to_state)
 
 
 # =============================================================================
@@ -228,7 +227,7 @@ class TestStateRestoration:
         )
 
         assert sm.state == STATE_HEATING
-        assert sm.demand_on is True
+        assert sm.demand_on
         assert sm.last_on == now
         assert sm.last_off == now - timedelta(minutes=30)
 
@@ -255,46 +254,36 @@ class TestStateRestoration:
 
 
 class TestComputeRemaining:
-    """Test _compute_remaining helper."""
+    """Test compute_remaining helper."""
 
     def test_none_last_time_returns_full_duration(self, make_state_machine):
         """None last_time returns full duration."""
         sm = make_state_machine()
-        result = sm._compute_remaining(None, 100)
-        assert result == 100
+        assert sm.compute_remaining(None, 100) == 100
 
-    def test_elapsed_less_than_duration(self, make_state_machine):
-        """Elapsed time less than duration returns remaining."""
+    @pytest.mark.parametrize(
+        ("elapsed_sec", "expected"),
+        [
+            (0, 100),
+            (50, 50),
+            (99, 1),
+            (100, 0),
+            (150, 0),
+            (1000, 0),
+        ],
+    )
+    def test_remaining_for_elapsed(
+        self, make_state_machine, elapsed_sec, expected
+    ):
+        """Remaining time is clamped to [0, duration]."""
         sm = make_state_machine()
         now = _now()
-        last_time = now - timedelta(seconds=50)
+        last_time = now - timedelta(seconds=elapsed_sec)
 
         with patch("homeassistant.util.dt.now", return_value=now):
-            result = sm._compute_remaining(last_time, 100)
+            result = sm.compute_remaining(last_time, 100)
 
-        assert result == 50
-
-    def test_elapsed_more_than_duration(self, make_state_machine):
-        """Elapsed time more than duration returns 0."""
-        sm = make_state_machine()
-        now = _now()
-        last_time = now - timedelta(seconds=150)
-
-        with patch("homeassistant.util.dt.now", return_value=now):
-            result = sm._compute_remaining(last_time, 100)
-
-        assert result == 0
-
-    def test_exactly_at_duration(self, make_state_machine):
-        """Exactly at duration returns 0."""
-        sm = make_state_machine()
-        now = _now()
-        last_time = now - timedelta(seconds=100)
-
-        with patch("homeassistant.util.dt.now", return_value=now):
-            result = sm._compute_remaining(last_time, 100)
-
-        assert result == 0
+        assert result == expected
 
 
 # =============================================================================
@@ -319,7 +308,7 @@ class TestDemandLogic:
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sm.set_demand(demand_on=True)
 
-        assert sm.demand_on is True
+        assert sm.demand_on
         assert sm.state == STATE_HEATING
         # turn_on should have been called
         hass.services.async_call.assert_awaited_once()
@@ -338,7 +327,7 @@ class TestDemandLogic:
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sm.set_demand(demand_on=True)
 
-        assert sm.demand_on is True
+        assert sm.demand_on
         assert sm.state == STATE_PENDING_ON
         assert sm.wait_task is not None
         assert sm.wait_until is not None
@@ -348,7 +337,6 @@ class TestDemandLogic:
         # hass.async_create_task) so hass.async_block_till_done() does not
         # block on the long sleep.
         hass.async_create_task.assert_not_called()
-        sm.cancel_wait()
 
     @pytest.mark.asyncio
     async def test_set_demand_off_with_wait(self, setup_state_machine_hass):
@@ -368,13 +356,12 @@ class TestDemandLogic:
         with patch("homeassistant.util.dt.now", return_value=_now()):
             await sm.set_demand(demand_on=False)
 
-        assert sm.demand_on is False
+        assert not sm.demand_on
         assert sm.state == STATE_PENDING_OFF
         assert sm.wait_task is not None
         # turn_off should NOT have been called yet
         hass.services.async_call.assert_not_awaited()
         hass.async_create_task.assert_not_called()
-        sm.cancel_wait()
 
     @pytest.mark.asyncio
     async def test_demand_unchanged_no_op(self, setup_state_machine_hass):
@@ -384,10 +371,9 @@ class TestDemandLogic:
 
         await sm.set_demand(demand_on=True)
 
-        assert sm.demand_on is True
+        assert sm.demand_on
         # No state change, no service calls
         hass.services.async_call.assert_not_awaited()
-        sm.cancel_wait()
 
 
 # =============================================================================
@@ -407,7 +393,7 @@ class TestWaitManagement:
         sm._wait_task = mock_task
         sm._wait_until = _now() + timedelta(seconds=100)
 
-        sm._cancel_wait()
+        sm.cancel_wait()
 
         mock_task.cancel.assert_called_once()
         assert sm.wait_task is None
@@ -422,7 +408,7 @@ class TestWaitManagement:
         sm._wait_task = mock_task
         sm._wait_until = _now() + timedelta(seconds=100)
 
-        sm._cancel_wait()
+        sm.cancel_wait()
 
         mock_task.cancel.assert_not_called()
         assert sm.wait_task is None
@@ -457,7 +443,6 @@ class TestWaitManagement:
         # hass.async_create_task) so hass.async_block_till_done() does not
         # block on the long sleep.
         hass.async_create_task.assert_not_called()
-        sm.cancel_wait()
 
 
 # =============================================================================
@@ -474,7 +459,7 @@ class TestCallbacks:
         sm = make_state_machine()
         callback = AsyncMock()
 
-        sm.register_on_state_change(callback)
+        sm.on_state_change = callback
 
         await sm.transition_to(STATE_HEATING)
 
@@ -488,12 +473,12 @@ class TestCallbacks:
         async def bad_callback(state):
             raise ValueError("Test error")
 
-        sm.register_on_state_change(bad_callback)
+        sm.on_state_change = bad_callback
 
         # Should still transition despite callback error
         result = await sm.transition_to(STATE_HEATING)
 
-        assert result is True
+        assert result
         assert sm.state == STATE_HEATING
 
 
@@ -510,14 +495,14 @@ class TestTransitions:
         """Valid transition succeeds."""
         sm = make_state_machine()
         result = await sm.transition_to(STATE_HEATING)
-        assert result is True
+        assert result
         assert sm.state == STATE_HEATING
 
     @pytest.mark.asyncio
     async def test_invalid_transition_fails(self, make_state_machine):
         """Invalid transition fails."""
         sm = make_state_machine()
-        # Find an actually invalid transition - IDLE -> IDLE should fail
+        # IDLE -> IDLE is not a valid transition
         result = await sm.transition_to(STATE_IDLE)
-        assert result is False
+        assert not result
         assert sm.state == STATE_IDLE

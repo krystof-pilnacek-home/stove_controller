@@ -72,8 +72,8 @@ class TestStateMachineIntegration:
 
         await sensor.async_added_to_hass()
 
-        # Both should start in IDLE
-        assert sensor._state == STATE_IDLE
+        # Sensor native value mirrors the state machine state.
+        assert sensor.native_value == STATE_IDLE
         assert sensor._state_machine.state == STATE_IDLE
 
     @pytest.mark.asyncio
@@ -94,33 +94,23 @@ class TestStateMachineIntegration:
             await sensor.handle_demand_change(demand_on=True)
 
         # State machine should have processed the demand
-        assert sensor._state_machine.demand_on is True
+        assert sensor._state_machine.demand_on
 
     @pytest.mark.asyncio
-    async def test_state_machine_transition_validation(
-        self, setup_sensor_with_hass
-    ):
-        """Test that valid transitions are accepted by state machine."""
-        sensor, hass = setup_sensor_with_hass
-
-        await sensor.async_added_to_hass()
-
-        # State machine should accept valid transitions
-        # From IDLE, PENDING_OFF is valid (when relay is ON but demand is OFF)
-        assert sensor._state_machine.is_valid_transition(STATE_PENDING_OFF) is True
-
-    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "target",
+        [STATE_HEATING, STATE_PENDING_ON, STATE_PENDING_OFF],
+    )
     async def test_state_machine_valid_transitions(
-        self, setup_sensor_with_hass
+        self, setup_sensor_with_hass, target
     ):
-        """Test that valid transitions are accepted by state machine."""
+        """Valid transitions from IDLE are accepted by the state machine."""
         sensor, hass = setup_sensor_with_hass
 
         await sensor.async_added_to_hass()
 
-        # From IDLE, HEATING and PENDING_ON should be valid
-        assert sensor._state_machine.is_valid_transition(STATE_HEATING) is True
-        assert sensor._state_machine.is_valid_transition(STATE_PENDING_ON) is True
+        # From IDLE, HEATING, PENDING_ON and PENDING_OFF are valid.
+        assert sensor._state_machine.is_valid_transition(target)
 
     @pytest.mark.asyncio
     async def test_state_machine_callback_on_state_change(
@@ -135,5 +125,5 @@ class TestStateMachineIntegration:
         await sensor._state_machine.transition_to(STATE_HEATING)
 
         # Sensor attributes should be in sync
-        assert sensor._state == STATE_HEATING
+        assert sensor.native_value == STATE_HEATING
         assert sensor._state_machine.state == STATE_HEATING

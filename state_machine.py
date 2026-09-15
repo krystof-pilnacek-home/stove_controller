@@ -48,7 +48,12 @@ class StoveStateMachine:
     - Timestamp tracking for anti-short-cycle protection
     """
 
-    # All valid state transitions
+    # All valid state transitions.
+    # IDLE -> PENDING_OFF and HEATING -> PENDING_ON are valid because the relay
+    # can be toggled externally: with demand OFF a relay turned on externally
+    # (while IDLE) must wait min_on before being turned off (PENDING_OFF), and
+    # with demand ON a relay turned off externally (while HEATING) must wait
+    # min_off before being turned back on (PENDING_ON).
     VALID_TRANSITIONS = {
         STATE_IDLE: [STATE_HEATING, STATE_PENDING_ON, STATE_PENDING_OFF],
         STATE_HEATING: [STATE_IDLE, STATE_PENDING_OFF, STATE_PENDING_ON],
@@ -91,8 +96,8 @@ class StoveStateMachine:
         self._wait_task: asyncio.Task | None = None
         self._wait_version: int = 0
 
-        # State change callbacks
-        self._on_state_change: (
+        # State change callback (set by the owning entity).
+        self.on_state_change: (
             Callable[[ControllerState], Coroutine[Any, Any, None]] | None
         ) = None
 
@@ -151,12 +156,6 @@ class StoveStateMachine:
         """Minimum off duration in seconds."""
         return self._min_off_duration
 
-    def register_on_state_change(
-        self, callback: Callable[[ControllerState], Coroutine[Any, Any, None]]
-    ) -> None:
-        """Register callback for state changes."""
-        self._on_state_change = callback
-
     def get_remaining_seconds(self) -> int:
         """Get remaining wait time in seconds."""
         if self._wait_until:
@@ -203,47 +202,46 @@ class StoveStateMachine:
         self._demand_on = demand_on
         await self._apply_demand_logic(relay_on)
 
-    async def sync_demand(self, demand_on: bool, relay_on: bool | None = None) -> None:
-        """Sync demand state (for initialization).
+    async def evaluate(self, relay_on: bool | None = None) -> None:
+        """Evaluate and set the correct state based on current conditions.
 
         Args:
-            demand_on: Demand state to sync
-            relay_on: Optional current relay state
+            relay_on: Optional explicit relay state (avoids HA call if provided)
         """
-        self._demand_on = demand_on
+        if self.hass is None:
+            # During testing without HA, just use provided relay_on or default to False
+            if relay_on is None:
+                relay_on = False
+            self.cancel_wait()
+            await self._apply_demand_logic(relay_on)
+            return
+
+        if relay_on is None:
+            relay_state = self.hass.states.get(self._relay_entity)
+            if relay_state is None:
+                _LOGGER.warning("Relay entity %s not available yet", self._relay_entity)
+                if self._state != STATE_IDLE:
+                    await self.transition_to(STATE_IDLE)
+                return
+            relay_on = relay_state.state == "on"
+
+        self.cancel_wait()
         await self._apply_demand_logic(relay_on)
 
-    async def evaluate(self, relay_on: bool | None = None) -> None:
-        """Evaluate current state based on demand and relay state.
-
-        Public method to trigger state evaluation. Preferred over direct
-        _evaluate_state calls.
-
-        Args:
-            relay_on: Optional current relay state (avoids HA call if provided)
-        """
-        await self._evaluate_state(relay_on)
-
-    def cancel_wait(self) -> None:
-        """Cancel any active wait timer.
-
-        Public method to cancel waits. Preferred over direct _cancel_wait calls.
-        """
-        self._cancel_wait()
 
     async def update_relay_state(self, new_state: str) -> None:
         """Update internal tracking when relay state changes externally."""
-        if new_state == "on":
-            self._last_on = dt_util.now()
-        elif new_state == "off":
-            self._last_off = dt_util.now()
-        else:
-            _LOGGER.warning("Unknown relay state: %s", new_state)
-            return
+        match new_state:
+            case "on":
+                self._last_on = dt_util.now()
+            case "off":
+                self._last_off = dt_util.now()
+            case _:
+                _LOGGER.warning("Unknown relay state: %s", new_state)
+                return
 
         # Pass the new relay state to avoid fetching it again
-        relay_on = new_state == "on"
-        await self._apply_demand_logic(relay_on)
+        await self._apply_demand_logic(new_state == "on")
 
     async def transition_to(self, target: ControllerState) -> bool:
         """Transition to a new state if valid."""
@@ -255,9 +253,9 @@ class StoveStateMachine:
         self._state = target
         _LOGGER.debug("State transition: %s -> %s", old_state, target)
 
-        if self._on_state_change:
+        if self.on_state_change:
             try:
-                await self._on_state_change(target)
+                await self.on_state_change(target)
             except Exception as e:
                 _LOGGER.error("Error in state change callback: %s", e)
 
@@ -288,18 +286,19 @@ class StoveStateMachine:
             state = STATE_IDLE
 
         # Validate consistency and correct if needed
-        if state == STATE_HEATING and not demand_on:
-            demand_on = True
-            _LOGGER.warning("Corrected demand_on to match HEATING state")
-        elif state == STATE_IDLE and demand_on:
-            demand_on = False
-            _LOGGER.warning("Corrected demand_on to match IDLE state")
-        elif state == STATE_PENDING_ON and not demand_on:
-            demand_on = True
-            _LOGGER.warning("Corrected demand_on to match PENDING_ON state")
-        elif state == STATE_PENDING_OFF and demand_on:
-            demand_on = False
-            _LOGGER.warning("Corrected demand_on to match PENDING_OFF state")
+        match state:
+            case ControllerState.HEATING if not demand_on:
+                demand_on = True
+                _LOGGER.warning("Corrected demand_on to match HEATING state")
+            case ControllerState.IDLE if demand_on:
+                demand_on = False
+                _LOGGER.warning("Corrected demand_on to match IDLE state")
+            case ControllerState.PENDING_ON if not demand_on:
+                demand_on = True
+                _LOGGER.warning("Corrected demand_on to match PENDING_ON state")
+            case ControllerState.PENDING_OFF if demand_on:
+                demand_on = False
+                _LOGGER.warning("Corrected demand_on to match PENDING_OFF state")
 
         # Set all fields atomically
         self._state = state
@@ -312,10 +311,11 @@ class StoveStateMachine:
         if wait_until and state in (STATE_PENDING_ON, STATE_PENDING_OFF):
             remaining = (wait_until - dt_util.now()).total_seconds()
             if remaining > 0:
-                if state == STATE_PENDING_ON:
-                    self._start_wait(int(remaining), self._complete_turn_on)
-                elif state == STATE_PENDING_OFF:
-                    self._start_wait(int(remaining), self._complete_turn_off)
+                match state:
+                    case ControllerState.PENDING_ON:
+                        self._start_wait(int(remaining), self._complete_turn_on)
+                    case ControllerState.PENDING_OFF:
+                        self._start_wait(int(remaining), self._complete_turn_off)
 
     def _compute_remaining(
         self, last_time: datetime | None, min_duration: int
@@ -326,7 +326,7 @@ class StoveStateMachine:
         elapsed = (dt_util.now() - last_time).total_seconds()
         return max(0, int(min_duration - elapsed))
 
-    def _cancel_wait(self) -> None:
+    def cancel_wait(self) -> None:
         """Cancel any existing wait task."""
         if self._wait_task and not self._wait_task.done():
             self._wait_task.cancel()
@@ -341,7 +341,7 @@ class StoveStateMachine:
         """Start a wait task for the specified duration."""
         # Increment version to identify this wait task
         current_version = self._wait_version + 1
-        self._cancel_wait()
+        self.cancel_wait()
 
         if duration_sec <= 0:
             self._wait_version = current_version
@@ -360,8 +360,8 @@ class StoveStateMachine:
         # This mirrors the pre-refactor behaviour where _start_wait called
         # async_write_ha_state() after setting _wait_until.  The notification
         # callback completes instantly, so tracking it is safe.
-        if self._on_state_change is not None:
-            coro = self._on_state_change(self._state)
+        if self.on_state_change is not None:
+            coro = self.on_state_change(self._state)
             if self.hass:
                 self.hass.async_create_task(coro)
             else:
@@ -465,7 +465,7 @@ class StoveStateMachine:
             relay_on: Optional explicit relay state. If not provided, will be fetched.
         """
         # Cancel any existing wait before starting new logic
-        self._cancel_wait()
+        self.cancel_wait()
 
         if self.hass is None and relay_on is None:
             # Cannot determine relay state without HA and no override
@@ -502,28 +502,4 @@ class StoveStateMachine:
             if self._state != STATE_IDLE:
                 await self.transition_to(STATE_IDLE)
 
-    async def _evaluate_state(self, relay_on: bool | None = None) -> None:
-        """Evaluate and set the correct state based on current conditions.
 
-        Args:
-            relay_on: Optional explicit relay state (avoids HA call if provided)
-        """
-        if self.hass is None:
-            # During testing without HA, just use provided relay_on or default to False
-            if relay_on is None:
-                relay_on = False
-            self._cancel_wait()
-            await self._apply_demand_logic(relay_on)
-            return
-
-        if relay_on is None:
-            relay_state = self.hass.states.get(self._relay_entity)
-            if relay_state is None:
-                _LOGGER.warning("Relay entity %s not available yet", self._relay_entity)
-                if self._state != STATE_IDLE:
-                    await self.transition_to(STATE_IDLE)
-                return
-            relay_on = relay_state.state == "on"
-
-        self._cancel_wait()
-        await self._apply_demand_logic(relay_on)

@@ -59,7 +59,7 @@ class TestScenario1SimpleCases:
             await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         # Should have called turn_on service
         hass.services.async_call.assert_awaited_once()
         call_args = hass.services.async_call.call_args
@@ -84,7 +84,7 @@ class TestScenario1SimpleCases:
             await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # Should have called turn_off service
         hass.services.async_call.assert_awaited_once()
         call_args = hass.services.async_call.call_args
@@ -102,7 +102,7 @@ class TestScenario1SimpleCases:
         await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         # No service call needed
         hass.services.async_call.assert_not_awaited()
 
@@ -117,7 +117,7 @@ class TestScenario1SimpleCases:
         await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # No service call needed
         hass.services.async_call.assert_not_awaited()
 
@@ -145,7 +145,7 @@ class TestScenario2WaitTriggered:
             await sensor.handle_demand_change(demand_on=True)
 
         assert sensor._state == STATE_PENDING_ON
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._wait_task is not None
         assert sensor._wait_until is not None
         # Should NOT have called turn_on service yet
@@ -172,7 +172,7 @@ class TestScenario2WaitTriggered:
             await sensor.handle_demand_change(demand_on=False)
 
         assert sensor._state == STATE_PENDING_OFF
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         assert sensor._wait_task is not None
         assert sensor._wait_until is not None
         # Should NOT have called turn_off service yet
@@ -200,7 +200,7 @@ class TestScenario2WaitTriggered:
         # Simulate wait completion: cancel the real wait task (instead of
         # orphaning it by nilling the reference) so no _wait_and_execute
         # task lingers after the test.
-        sensor._state_machine._cancel_wait()
+        sensor._state_machine.cancel_wait()
         assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
@@ -231,7 +231,7 @@ class TestScenario2WaitTriggered:
         # Simulate wait completion: cancel the real wait task (instead of
         # orphaning it by nilling the reference) so no _wait_and_execute
         # task lingers after the test.
-        sensor._state_machine._cancel_wait()
+        sensor._state_machine.cancel_wait()
         assert sensor._wait_task is None
 
         hass.services.async_call.reset_mock()
@@ -274,7 +274,7 @@ class TestScenario3DemandReversal:
         assert sensor._wait_task is None
         assert sensor._wait_until is None
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
 
     @pytest.mark.asyncio
     async def test_demand_on_during_pending_off(self, setup_sensor_hass):
@@ -299,7 +299,7 @@ class TestScenario3DemandReversal:
         assert sensor._wait_task is None
         assert sensor._wait_until is None
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
 
 
 # =============================================================================
@@ -330,7 +330,7 @@ class TestScenario3bDemandAtTimerCompletion:
         # Simulate demand changing back to ON during the wait
         await sensor.handle_demand_change(demand_on=True)
         assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor._demand_on
 
         # Now simulate wait completion (even though demand is now ON)
         # The _complete_turn_off should check demand_on and not turn off
@@ -370,7 +370,7 @@ class TestScenario3bDemandAtTimerCompletion:
         # Simulate demand changing back to OFF during the wait
         await sensor.handle_demand_change(demand_on=False)
         assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
 
         # Now simulate wait completion (even though demand is now OFF)
         # The _complete_turn_on should check demand_on and not turn on
@@ -668,7 +668,7 @@ class TestScenario8AdditionalCoverage:
         await sensor.handle_demand_change(demand_on=False)
 
         # Should return early, no state change
-        assert sensor._demand_on is False
+        assert not sensor._demand_on
         # async_write_ha_state should not be called
         sensor.async_write_ha_state.assert_not_called()
 
@@ -687,7 +687,7 @@ class TestScenario8AdditionalCoverage:
 
         await sensor.sync_demand(demand_on=True, demand_entity_id="switch.test")
 
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._demand_entity_id == "switch.test"
         # Verify state was updated based on demand logic - should be HEATING
         assert sensor._state == STATE_HEATING
@@ -707,7 +707,7 @@ class TestScenario8AdditionalCoverage:
 
         await sensor.sync_demand(demand_on=True)
 
-        assert sensor._demand_on is True
+        assert sensor._demand_on
         assert sensor._demand_entity_id is None
         # Verify state was updated based on demand logic - should be HEATING
         assert sensor._state == STATE_HEATING

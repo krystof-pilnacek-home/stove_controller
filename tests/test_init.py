@@ -18,7 +18,7 @@ class TestAsyncSetupEntry:
 
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
-        assert result is True
+        assert result
         assert DOMAIN in mock_hass.data
         assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
         mock_hass.config_entries.async_forward_entry_setups.assert_called_once()
@@ -48,7 +48,7 @@ class TestAsyncSetupEntry:
 
         assert mock_sensor.sync_demand.called
         call_args = mock_sensor.sync_demand.call_args
-        assert call_args[0][0] is True
+        assert call_args[0][0]
         assert call_args[0][1] == "switch.stove_demand"
 
     @pytest.mark.asyncio
@@ -61,9 +61,7 @@ class TestAsyncSetupEntry:
 
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
-        assert result is True
-
-
+        assert result
 class TestAsyncUnloadEntry:
     """Test the async_unload_entry function."""
 
@@ -75,7 +73,7 @@ class TestAsyncUnloadEntry:
 
         result = await async_unload_entry(mock_hass, mock_config_entry)
 
-        assert result is True
+        assert result
         mock_hass.config_entries.async_unload_platforms.assert_called_once()
         assert mock_config_entry.entry_id not in mock_hass.data[DOMAIN]
 
@@ -87,7 +85,7 @@ class TestAsyncUnloadEntry:
 
         result = await async_unload_entry(mock_hass, mock_config_entry)
 
-        assert result is False
+        assert not result
         mock_hass.config_entries.async_unload_platforms.assert_called_once()
         assert mock_config_entry.entry_id in mock_hass.data[DOMAIN]
 
@@ -99,4 +97,4 @@ class TestAsyncUnloadEntry:
 
         result = await async_unload_entry(mock_hass, mock_config_entry)
 
-        assert result is True
+        assert result

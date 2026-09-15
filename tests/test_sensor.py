@@ -45,10 +45,9 @@ class TestStoveControllerSensor:
         assert sensor._attr_name == "Stove Controller"
         assert sensor._attr_unique_id == "test_entry_id_stove_controller"
         assert sensor._attr_icon == "mdi:fire"
-        assert sensor._attr_should_poll is False
-        assert sensor._state == STATE_IDLE
-        assert sensor._demand_on is False
-
+        assert not sensor._attr_should_poll
+        assert sensor.native_value == STATE_IDLE
+        assert not sensor._demand_on
     def test_device_info(self, sensor):
         """Test device info."""
         assert sensor._attr_device_info["identifiers"] == {(DOMAIN, "test_entry_id")}
@@ -66,10 +65,10 @@ class TestStoveControllerSensor:
         """Test basic extra state attributes."""
         attrs = sensor.extra_state_attributes
         assert attrs["relay_entity"] == "switch.test_relay"
-        assert attrs["demand_on"] is False
+        assert not attrs["demand_on"]
         assert attrs["min_on_duration_min"] == 30
         assert attrs["min_off_duration_min"] == 25
-        assert attrs["in_grace_period"] is False
+        assert not attrs["in_grace_period"]
         assert attrs["time_remaining_sec"] == 0
 
     def test_extra_state_attributes_with_demand_entity(self, sensor):
@@ -98,40 +97,26 @@ class TestStoveControllerSensor:
         """Test in_grace_period is True during pending states."""
         sensor._state = STATE_PENDING_ON
         attrs = sensor.extra_state_attributes
-        assert attrs["in_grace_period"] is True
-
+        assert attrs["in_grace_period"]
         sensor._state = STATE_PENDING_OFF
         attrs = sensor.extra_state_attributes
-        assert attrs["in_grace_period"] is True
-
+        assert attrs["in_grace_period"]
     def test_in_grace_period_false(self, sensor):
         """Test in_grace_period is False during non-pending states."""
         sensor._state = STATE_IDLE
         attrs = sensor.extra_state_attributes
-        assert attrs["in_grace_period"] is False
-
+        assert not attrs["in_grace_period"]
         sensor._state = STATE_HEATING
         attrs = sensor.extra_state_attributes
-        assert attrs["in_grace_period"] is False
-
-
+        assert not attrs["in_grace_period"]
 class TestSensorLifecycle:
     """Test sensor lifecycle methods."""
 
     @pytest.mark.asyncio
-    async def test_async_added_to_hass_restores_state(self, sensor):
+    async def test_async_added_to_hass_restores_state(self, setup_sensor_hass):
         """Test that sensor restores state from previous state."""
-        hass = MagicMock()
-        hass.states = MagicMock()
-        hass.states.get = MagicMock()
-        hass.states.is_state = MagicMock()
-        hass.services = MagicMock()
-        hass.services.async_call = AsyncMock()
-        hass.data = {}
-
-        sensor.hass = hass
-        sensor._state_machine.hass = hass
-        sensor.async_on_remove = MagicMock()
+        sensor, hass = setup_sensor_hass()
+        hass.states.is_state.return_value = True  # relay ON during HEATING
 
         mock_state = MagicMock()
         mock_state.state = STATE_HEATING
@@ -140,46 +125,28 @@ class TestSensorLifecycle:
             "last_on": "2024-01-15T10:00:00+00:00",
             "last_off": "2024-01-15T09:00:00+00:00",
         }
+        sensor.async_get_last_state = AsyncMock(return_value=mock_state)
 
         with patch(
             "homeassistant.util.dt.parse_datetime",
             side_effect=dt_util.parse_datetime,
         ):
-            with patch.object(
-                sensor, "async_get_last_state", new_callable=AsyncMock
-            ) as mock_get_state:
-                mock_get_state.return_value = mock_state
+            await sensor.async_added_to_hass()
 
-                await sensor.async_added_to_hass()
-
-        assert sensor._state == STATE_HEATING
-        assert sensor._demand_on is True
+        assert sensor.native_value == STATE_HEATING
+        assert sensor._demand_on
         assert sensor._last_on is not None
         assert sensor._last_off is not None
 
     @pytest.mark.asyncio
-    async def test_async_added_to_hass_no_previous_state(self, sensor):
+    async def test_async_added_to_hass_no_previous_state(self, setup_sensor_hass):
         """Test sensor with no previous state."""
-        hass = MagicMock()
-        hass.states = MagicMock()
-        hass.states.get = MagicMock()
-        hass.states.is_state = MagicMock()
-        hass.services = MagicMock()
-        hass.services.async_call = AsyncMock()
-        hass.data = {}
+        sensor, hass = setup_sensor_hass()
+        hass.states.is_state.return_value = False  # relay OFF
 
-        sensor.hass = hass
-        sensor._state_machine.hass = hass
-        sensor.async_on_remove = MagicMock()
+        await sensor.async_added_to_hass()
 
-        with patch.object(
-            sensor, "async_get_last_state", new_callable=AsyncMock
-        ) as mock_get_state:
-            mock_get_state.return_value = None
-
-            await sensor.async_added_to_hass()
-
-        assert sensor._state == STATE_IDLE
+        assert sensor.native_value == STATE_IDLE
 
     @pytest.mark.asyncio
     async def test_async_will_remove_from_hass(self, sensor):
