@@ -23,7 +23,6 @@ dev = [
 
 [tool.setuptools]
 packages = ["stove_controller"]
-package-dir = {"stove_controller" = "."}
 
 [tool.setuptools.package-data]
 stove_controller = ["*.json"]

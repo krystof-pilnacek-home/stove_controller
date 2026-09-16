@@ -105,20 +105,11 @@ def hass_config_dir(hass_tmp_config_dir):
     custom_components_dir = config_dir / "custom_components"
     custom_components_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy the integration to custom_components
-    src_dir = pathlib.Path(__file__).parent.parent
+    # Copy the integration package to custom_components/<domain>
+    repo_root = pathlib.Path(__file__).parent.parent
+    src_pkg_dir = repo_root / DOMAIN
     dst_dir = custom_components_dir / DOMAIN
-    dst_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy all Python files and manifest from the repo root
-    for item in src_dir.iterdir():
-        if item.is_file() and (item.suffix == ".py" or item.name == "manifest.json"):
-            shutil.copy2(item, dst_dir / item.name)
-
-    # Copy the stove_controller package directory
-    src_pkg_dir = src_dir / DOMAIN
-    if src_pkg_dir.exists():
-        shutil.copytree(src_pkg_dir, dst_dir / DOMAIN, dirs_exist_ok=True)
+    shutil.copytree(src_pkg_dir, dst_dir, dirs_exist_ok=True)
 
     # Add custom_components to sys.path so imports work
     if str(custom_components_dir) not in sys.path:
