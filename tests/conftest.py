@@ -10,6 +10,69 @@ from homeassistant.core import HomeAssistant
 
 from stove_controller.const import DOMAIN
 from stove_controller.sensor import StoveControllerSensor
+from stove_controller.state_machine import StoveStateMachine
+
+
+@pytest.fixture
+async def make_state_machine():
+    """Factory fixture to create a StoveStateMachine.
+
+    Tracks every created state machine and cancels any pending wait task on
+    teardown, so a failing assertion mid-test cannot leak a ``wait_and_execute``
+    task.
+    """
+    created: list[StoveStateMachine] = []
+
+    def _make(
+        hass: MagicMock | None = None,
+        relay_entity: str = "switch.test_relay",
+        min_on_min: int = 30,
+        min_off_min: int = 25,
+    ) -> StoveStateMachine:
+        sm = StoveStateMachine(
+            hass=hass,
+            relay_entity=relay_entity,
+            min_on_duration=min_on_min * 60,
+            min_off_duration=min_off_min * 60,
+        )
+        created.append(sm)
+        return sm
+
+    yield _make
+
+    wait_tasks = [
+        sm.wait_task
+        for sm in created
+        if sm.wait_task is not None and not sm.wait_task.done()
+    ]
+    for sm in created:
+        sm.cancel_wait()
+    for task in wait_tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.fixture
+async def setup_state_machine_hass(make_state_machine):
+    """Factory fixture to set up a state machine with a mock hass."""
+
+    def _setup(
+        relay_entity: str = "switch.test_relay",
+        min_on_min: int = 30,
+        min_off_min: int = 25,
+    ) -> tuple[StoveStateMachine, MagicMock]:
+        hass = MagicMock()
+        hass.states = MagicMock()
+        hass.states.is_state = MagicMock(return_value=False)
+        hass.states.get = MagicMock()
+        hass.services = MagicMock()
+        hass.services.async_call = AsyncMock()
+        hass.async_create_task = MagicMock()
+
+        sm = make_state_machine(hass, relay_entity, min_on_min, min_off_min)
+        return sm, hass
+
+    yield _setup
 
 
 @pytest.fixture
