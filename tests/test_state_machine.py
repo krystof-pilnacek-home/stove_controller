@@ -1,7 +1,5 @@
 """Tests for the StoveStateMachine class."""
 
-import asyncio
-import contextlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,8 +11,8 @@ from stove_controller.const import (
     STATE_PENDING_OFF,
     STATE_PENDING_ON,
     STATE_UNAVAILABLE,
+    ControllerState,
 )
-from stove_controller.state_machine import StoveStateMachine
 
 
 def _now() -> datetime:
@@ -22,70 +20,23 @@ def _now() -> datetime:
     return datetime(2026, 1, 15, 20, 0, 0, tzinfo=UTC)
 
 
-# =============================================================================
-# Fixtures
-# =============================================================================
+# Documented (state -> demand_on) pairing enforced by restore_state.
+CONSISTENT_DEMAND: dict[ControllerState, bool] = {
+    STATE_HEATING: True,
+    STATE_IDLE: False,
+    STATE_PENDING_ON: True,
+    STATE_PENDING_OFF: False,
+}
 
+# Every active state paired with both possible supplied demand values: the
+# full 4x2 correction matrix.  restore_state rewrites demand_on to the
+# documented pairing regardless of the supplied value.
+RESTORE_CORRECTION_CASES = [
+    (state, supplied)
+    for state in CONSISTENT_DEMAND
+    for supplied in (False, True)
+]
 
-@pytest.fixture
-async def make_state_machine():
-    """Factory fixture to create a StoveStateMachine.
-
-    Tracks every created state machine and cancels any pending wait task on
-    teardown, so a failing assertion mid-test cannot leak a ``wait_and_execute``
-    task.
-    """
-    created: list[StoveStateMachine] = []
-
-    def _make(
-        hass: MagicMock | None = None,
-        relay_entity: str = "switch.test_relay",
-        min_on_min: int = 30,
-        min_off_min: int = 25,
-    ) -> StoveStateMachine:
-        sm = StoveStateMachine(
-            hass=hass,
-            relay_entity=relay_entity,
-            min_on_duration=min_on_min * 60,
-            min_off_duration=min_off_min * 60,
-        )
-        created.append(sm)
-        return sm
-
-    yield _make
-
-    wait_tasks = [
-        sm.wait_task
-        for sm in created
-        if sm.wait_task is not None and not sm.wait_task.done()
-    ]
-    for sm in created:
-        sm.cancel_wait()
-    for task in wait_tasks:
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-
-@pytest.fixture
-async def setup_state_machine_hass(make_state_machine):
-    """Factory fixture to set up a state machine with a mock hass."""
-    def _setup(
-        relay_entity: str = "switch.test_relay",
-        min_on_min: int = 30,
-        min_off_min: int = 25,
-    ) -> tuple[StoveStateMachine, MagicMock]:
-        hass = MagicMock()
-        hass.states = MagicMock()
-        hass.states.is_state = MagicMock(return_value=False)
-        hass.states.get = MagicMock()
-        hass.services = MagicMock()
-        hass.services.async_call = AsyncMock()
-        hass.async_create_task = MagicMock()
-
-        sm = make_state_machine(hass, relay_entity, min_on_min, min_off_min)
-        return sm, hass
-
-    yield _setup
 
 
 # =============================================================================
@@ -228,22 +179,65 @@ class TestTransitionValidation:
 class TestStateRestoration:
     """Test state restoration from saved data."""
 
-    def test_restore_valid_state(self, make_state_machine):
-        """Restore a valid state."""
+    @pytest.mark.parametrize(("state", "supplied_demand"), RESTORE_CORRECTION_CASES)
+    def test_demand_corrected_to_match_state(
+        self, make_state_machine, state: ControllerState, supplied_demand: bool
+    ):
+        """restore_state rewrites demand_on to the documented pairing.
+
+        HEATING/IDLE/PENDING_ON/PENDING_OFF each force a specific demand_on
+        regardless of the supplied value.  Only state and demand_on are
+        supplied so no wait task is scheduled.
+        """
         sm = make_state_machine()
-        now = _now()
+
+        sm.restore_state(state=state, demand_on=supplied_demand)
+
+        assert sm.state == state
+        assert sm.demand_on is CONSISTENT_DEMAND[state]
+
+    @pytest.mark.parametrize(("state", "supplied_demand"), RESTORE_CORRECTION_CASES)
+    def test_restore_preserves_timestamps(
+        self, make_state_machine, state: ControllerState, supplied_demand: bool
+    ):
+        """restore_state stores last_on/last_off verbatim."""
+        sm = make_state_machine()
+        last_on = _now() - timedelta(minutes=5)
+        last_off = _now() - timedelta(minutes=20)
 
         sm.restore_state(
-            state=STATE_HEATING,
-            demand_on=True,
-            last_on=now,
-            last_off=now - timedelta(minutes=30),
+            state=state,
+            demand_on=supplied_demand,
+            last_on=last_on,
+            last_off=last_off,
         )
 
-        assert sm.state == STATE_HEATING
-        assert sm.demand_on
-        assert sm.last_on == now
-        assert sm.last_off == now - timedelta(minutes=30)
+        assert sm.last_on == last_on
+        assert sm.last_off == last_off
+
+    @pytest.mark.parametrize("demand_on", [False, True])
+    def test_unavailable_preserves_demand(
+        self, make_state_machine, demand_on: bool
+    ):
+        """UNAVAILABLE has no consistency rule, so demand_on is preserved."""
+        sm = make_state_machine()
+
+        sm.restore_state(state=STATE_UNAVAILABLE, demand_on=demand_on)
+
+        assert sm.state == STATE_UNAVAILABLE
+        assert sm.demand_on is demand_on
+
+    @pytest.mark.parametrize(("state", "supplied_demand"), RESTORE_CORRECTION_CASES)
+    def test_string_state_restores_consistently(
+        self, make_state_machine, state: ControllerState, supplied_demand: bool
+    ):
+        """Restoring from the state's string value yields the same invariant."""
+        sm = make_state_machine()
+
+        sm.restore_state(state=state.value, demand_on=supplied_demand)
+
+        assert sm.state == state
+        assert sm.demand_on is CONSISTENT_DEMAND[state]
 
     def test_restore_invalid_state(self, make_state_machine):
         """Restore an invalid state defaults to IDLE."""
@@ -252,14 +246,7 @@ class TestStateRestoration:
         sm.restore_state(state="invalid_state")
 
         assert sm.state == STATE_IDLE
-
-    def test_restore_state_string(self, make_state_machine):
-        """Restore state from string."""
-        sm = make_state_machine()
-
-        sm.restore_state(state="heating")
-
-        assert sm.state == STATE_HEATING
+        assert not sm.demand_on
 
 
 # =============================================================================
