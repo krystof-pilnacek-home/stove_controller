@@ -29,3 +29,7 @@ Add the integration via **Settings > Devices & Services > Add Integration** and 
 - Minimum on duration (minutes)
 - Minimum off duration (minutes)
 - Update interval (seconds)
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
