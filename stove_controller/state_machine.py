@@ -20,6 +20,7 @@ from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -232,7 +233,7 @@ class StoveStateMachine:
             relay_state = self.hass.states.get(self._relay_entity)
             if relay_state is None:
                 _LOGGER.warning("Relay entity %s not available yet", self._relay_entity)
-                if self._state is not STATE_UNAVAILABLE:
+                if self._state != STATE_UNAVAILABLE:
                     await self.transition_to(STATE_UNAVAILABLE)
                 return
             relay_on = relay_state.state == "on"
@@ -259,7 +260,13 @@ class StoveStateMachine:
                     "Unknown relay state: %s, transitioning to UNAVAILABLE", new_state
                 )
                 self.cancel_wait()
-                await self.transition_to(STATE_UNAVAILABLE)
+                # If already UNAVAILABLE, transition_to() rejects IDLE->IDLE-style
+                # self-transitions and the on_state_change callback never fires,
+                # so the cancelled wait would leave stale published attributes.
+                # Republish directly to guarantee the owning sensor reflects the
+                # current (now wait-less) state.
+                if not await self.transition_to(STATE_UNAVAILABLE):
+                    await self._republish_state()
                 return
 
         # Pass the new relay state to avoid fetching it again
@@ -367,6 +374,22 @@ class StoveStateMachine:
                     case ControllerState.PENDING_OFF:
                         self._start_wait(int(remaining), self._complete_turn_off)
 
+    async def _republish_state(self) -> None:
+        """Notify the owning entity of the current state without transitioning.
+
+        Used where the machine's state does not change (so ``transition_to``
+        would be a no-op that never fires the callback) but the published
+        attributes must still be refreshed -- e.g. an unknown relay state
+        arriving while already UNAVAILABLE, or ``_start_wait`` setting
+        ``_wait_until`` after the PENDING_* transition already published.
+        """
+        if self.on_state_change is None:
+            return
+        try:
+            await self.on_state_change(self._state)
+        except Exception as e:
+            _LOGGER.error("Error in state change callback: %s", e)
+
     def _compute_remaining(
         self, last_time: datetime | None, min_duration: int
     ) -> int:
@@ -462,17 +485,17 @@ class StoveStateMachine:
         evaluation and the post-wait completion callbacks.
         """
         if await turn_relay():
-            if self._state is not success_state:
+            if self._state != success_state:
                 await self.transition_to(success_state)
         else:
-            if self._state is not failure_state:
+            if self._state != failure_state:
                 await self.transition_to(failure_state)
             _LOGGER.warning(failure_msg)
 
     async def _complete_turn_on(self) -> None:
         """Complete the turn on action after wait period."""
         # Guard against cancelled waits (state may have changed)
-        if self._state is not STATE_PENDING_ON:
+        if self._state != STATE_PENDING_ON:
             _LOGGER.debug(
                 "_complete_turn_on called but not in PENDING_ON state "
                 "(state=%s)", self._state
@@ -487,13 +510,13 @@ class StoveStateMachine:
                 "Turn on failed; transitioned to IDLE",
             )
         else:
-            if self._state is not STATE_IDLE:
+            if self._state != STATE_IDLE:
                 await self.transition_to(STATE_IDLE)
 
     async def _complete_turn_off(self) -> None:
         """Complete the turn off action after wait period."""
         # Guard against cancelled waits (state may have changed)
-        if self._state is not STATE_PENDING_OFF:
+        if self._state != STATE_PENDING_OFF:
             _LOGGER.debug(
                 "_complete_turn_off called but not in PENDING_OFF state "
                 "(state=%s)", self._state
@@ -508,7 +531,7 @@ class StoveStateMachine:
                 "Turn off failed; transitioned to HEATING",
             )
         else:
-            if self._state is not STATE_HEATING:
+            if self._state != STATE_HEATING:
                 await self.transition_to(STATE_HEATING)
 
     async def _turn_on_relay(self) -> bool:
@@ -529,7 +552,7 @@ class StoveStateMachine:
             )
             self._last_on = dt_util.now()
             return True
-        except Exception as e:
+        except HomeAssistantError as e:
             _LOGGER.error("Failed to turn on relay %s: %s", self._relay_entity, e)
             return False
 
@@ -551,7 +574,7 @@ class StoveStateMachine:
             )
             self._last_off = dt_util.now()
             return True
-        except Exception as e:
+        except HomeAssistantError as e:
             _LOGGER.error("Failed to turn off relay %s: %s", self._relay_entity, e)
             return False
 
@@ -598,9 +621,9 @@ class StoveStateMachine:
                 )
 
         elif self._demand_on and relay_on:
-            if self._state is not STATE_HEATING:
+            if self._state != STATE_HEATING:
                 await self.transition_to(STATE_HEATING)
 
         else:
-            if self._state is not STATE_IDLE:
+            if self._state != STATE_IDLE:
                 await self.transition_to(STATE_IDLE)
