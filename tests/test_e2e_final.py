@@ -107,7 +107,7 @@ def hass_config_dir(hass_tmp_config_dir):
 
     # Copy the integration package to custom_components/<domain>
     repo_root = pathlib.Path(__file__).parent.parent
-    src_pkg_dir = repo_root / DOMAIN
+    src_pkg_dir = repo_root / "custom_components" / DOMAIN
     dst_dir = custom_components_dir / DOMAIN
     shutil.copytree(src_pkg_dir, dst_dir, dirs_exist_ok=True)
 

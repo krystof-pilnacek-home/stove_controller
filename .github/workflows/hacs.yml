@@ -1,0 +1,23 @@
+name: HACS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate HACS integration layout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Validate custom_components layout and manifest
+        run: python .github/scripts/validate_hacs_layout.py

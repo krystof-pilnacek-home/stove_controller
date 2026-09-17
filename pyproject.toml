@@ -4,8 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stove_controller"
-version = "0.0.2"
+version = "0.0.3"
 description = "Custom Home Assistant integration for stove controller with anti-short-cycle logic"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.14"
 
 [project.optional-dependencies]
@@ -19,10 +21,14 @@ dev = [
     "mypy>=1.0.0",
     "pytest-homeassistant-custom-component>=0.13",
     "pytest-socket>=0.6",
+    "bump-my-version>=0.20.0",
 ]
 
 [tool.setuptools]
 packages = ["stove_controller"]
+
+[tool.setuptools.package-dir]
+stove_controller = "custom_components/stove_controller"
 
 [tool.setuptools.package-data]
 stove_controller = ["*.json"]
