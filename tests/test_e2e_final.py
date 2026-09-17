@@ -50,6 +50,7 @@ from pytest_homeassistant_custom_component.common import (  # type: ignore[impor
     MockConfigEntry,
     async_fire_time_changed,
 )
+
 from stove_controller.const import (
     DOMAIN,
     STATE_HEATING,
