@@ -32,7 +32,7 @@ jobs:
         run: uv run pytest tests/ -v --tb=short --cov=stove_controller --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
