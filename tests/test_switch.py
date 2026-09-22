@@ -30,7 +30,6 @@ class TestStoveDemandSwitch:
         assert switch._attr_device_info["identifiers"] == {(DOMAIN, "test_entry_id")}
         assert switch._attr_device_info["name"] == "Stove Controller"
         assert switch._attr_device_info["manufacturer"] == "Custom"
-        assert switch._attr_device_info["model"] == "A251 Controller"
 
     def test_is_on_property(self, switch):
         """Test is_on property."""

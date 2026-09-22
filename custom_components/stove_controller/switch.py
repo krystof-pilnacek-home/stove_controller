@@ -1,6 +1,6 @@
 """Switch platform for the Stove Controller integration.
 
-Exposes a demand switch that the VTherm central boiler toggles directly,
+Exposes a demand switch that a thermostat (or any caller) toggles directly,
 replacing the external input_boolean.stove_demand helper.
 """
 
@@ -32,7 +32,7 @@ async def async_setup_entry(
 class StoveDemandSwitch(SwitchEntity, RestoreEntity):
     """Switch entity representing stove demand.
 
-    VTherm (or any caller) toggles this switch to request heat.
+    A thermostat (or any caller) toggles this switch to request heat.
     The controller sensor applies anti-short-cycle logic before
     forwarding the command to the physical relay.
     """
@@ -48,7 +48,6 @@ class StoveDemandSwitch(SwitchEntity, RestoreEntity):
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
             manufacturer="Custom",
-            model="A251 Controller",
         )
         self._is_on = False
 
