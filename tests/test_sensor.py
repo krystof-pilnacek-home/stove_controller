@@ -53,7 +53,7 @@ class TestStoveControllerSensor:
         assert sensor._attr_device_info["identifiers"] == {(DOMAIN, "test_entry_id")}
         assert sensor._attr_device_info["name"] == "Stove Controller"
         assert sensor._attr_device_info["manufacturer"] == "Custom"
-        assert sensor._attr_device_info["model"] == "A251 Controller"
+        assert "model" not in sensor._attr_device_info
 
     def test_native_value(self, sensor):
         """Test native_value property."""
@@ -206,7 +206,7 @@ class TestDeviceInfo:
         assert info["identifiers"] == {(DOMAIN, "test_entry")}
         assert info["name"] == "Stove Controller"
         assert info["manufacturer"] == "Custom"
-        assert info["model"] == "A251 Controller"
+        assert "model" not in info
 
 
 class TestAsyncSetupEntry:

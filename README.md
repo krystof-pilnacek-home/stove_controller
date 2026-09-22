@@ -30,6 +30,10 @@ Add the integration via **Settings > Devices & Services > Add Integration** and 
 - Minimum off duration (minutes)
 - Update interval (seconds)
 
+All of these can be changed later via the integration's **Configure** menu;
+the relay switch entity can be reconfigured without removing and re-adding
+the integration.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

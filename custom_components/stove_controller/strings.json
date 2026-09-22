@@ -16,8 +16,9 @@
     "step": {
       "init": {
         "title": "Stove Controller Options",
-        "description": "Adjust the anti-short-cycle timing parameters.",
+        "description": "Adjust the relay switch and anti-short-cycle timing parameters.",
         "data": {
+          "relay_entity": "Relay switch entity",
           "min_on_duration": "Minimum ON duration (minutes)",
           "min_off_duration": "Minimum OFF duration (minutes)"
         }

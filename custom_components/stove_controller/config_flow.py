@@ -56,6 +56,9 @@ CONFIG_SCHEMA = vol.Schema(
 
 OPTIONS_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_RELAY_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain="switch")
+        ),
         vol.Required(CONF_MIN_ON_DURATION): NumberSelector(
             NumberSelectorConfig(
                 min=1,
@@ -119,6 +122,7 @@ class StoveControllerOptionsFlow(config_entries.OptionsFlowWithReload):
 
         current = {**self.config_entry.data, **self.config_entry.options}
         suggested_values = {
+            CONF_RELAY_ENTITY: current.get(CONF_RELAY_ENTITY),
             CONF_MIN_ON_DURATION: current.get(
                 CONF_MIN_ON_DURATION, DEFAULT_MIN_ON_DURATION
             ),

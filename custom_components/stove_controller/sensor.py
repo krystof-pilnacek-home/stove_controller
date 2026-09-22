@@ -87,7 +87,6 @@ class StoveControllerSensor(RestoreEntity, SensorEntity):
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
             manufacturer="Custom",
-            model="A251 Controller",
         )
 
         self._state_machine = StoveStateMachine(
@@ -286,7 +285,6 @@ class StoveRemainingTimeSensor(SensorEntity):
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
             manufacturer="Custom",
-            model="A251 Controller",
         )
 
     @property
@@ -309,7 +307,6 @@ class StoveLastOnSensor(SensorEntity):
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
             manufacturer="Custom",
-            model="A251 Controller",
         )
 
     @property
@@ -332,7 +329,6 @@ class StoveLastOffSensor(SensorEntity):
             identifiers={(DOMAIN, entry_id)},
             name="Stove Controller",
             manufacturer="Custom",
-            model="A251 Controller",
         )
 
     @property
