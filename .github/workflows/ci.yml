@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  code-quality: write
 
 jobs:
   lint:
@@ -49,10 +48,10 @@ jobs:
             htmlcov/
           if-no-files-found: error
           retention-days: 14
-      - name: Upload coverage to GitHub Code Quality
+      - name: Upload coverage to Coveralls
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/upload-code-coverage@v1
+        uses: coverallsapp/github-action@v2
         with:
           file: coverage.xml
-          language: Python
-          label: code-coverage/pytest
+          format: cobertura
+          fail-on-error: true
